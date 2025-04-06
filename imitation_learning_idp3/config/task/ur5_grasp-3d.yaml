@@ -1,0 +1,30 @@
+name: ur5_grasp
+
+shape_meta:
+  # acceptable types: rgb, low_dim
+  obs:
+    point_cloud:
+      shape: [ 4096, 6 ]
+      type: point_cloud
+    agent_pos:
+      shape: [ 3 ]
+      type: low_dim
+  action:
+    shape: [ 3 ]
+
+dataset:
+  _target_: imitation_learning_idp3.dataset.ur5_grasp_dataset_3d.UR5GraspDataset3D
+#  zarr_path: ./data/ur5_grasp/ur5_grasp.zarr
+  zarr_path: ./data/ur5_assembly/ur5_assembly.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.00
+  max_train_episodes: 90
+
+  num_points: ${policy.pointcloud_encoder_cfg.num_points}
+
+env:
+#  _target_: imitation_learning_idp3.env.ur5_grasp.ur5_grasp_3d_env.UR5Grasp3dEnv
+  _target_: imitation_learning_idp3.env.ur5_assembly.ur5_assembly_env.UR5Env

@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro"
+       name="ur5" >
+
+  <!-- <xacro:arg name="transmission_hw_interface" default="hardware_interface/PositionJointInterface"/> -->
+ <xacro:arg name="transmission_hw_interface" default="hardware_interface/VelocityJointInterface"/>
+  <!-- common stuff -->
+  <xacro:include filename="$(find ur_description)/urdf/common.gazebo.xacro" />
+
+  <!-- ur5 --> 
+  <xacro:include filename="$(find ur_description)/urdf/ur5.urdf.xacro" />
+
+  <!-- arm -->
+  <xacro:arg name="kinematics_config" default="$(find ur_description)/config/ur5_default.yaml"/>
+  <xacro:ur5_robot prefix="" joint_limited="true"
+    shoulder_pan_lower_limit="${-pi}" shoulder_pan_upper_limit="${pi}"
+    shoulder_lift_lower_limit="${-pi}" shoulder_lift_upper_limit="${pi}"
+    elbow_joint_lower_limit="${-pi}" elbow_joint_upper_limit="${pi}"
+    wrist_1_lower_limit="${-pi}" wrist_1_upper_limit="${pi}"
+    wrist_2_lower_limit="${-pi}" wrist_2_upper_limit="${pi}"
+    wrist_3_lower_limit="${-pi}" wrist_3_upper_limit="${pi}"
+    transmission_hw_interface="$(arg transmission_hw_interface)"
+    kinematics_file="${load_yaml('$(arg kinematics_config)')}"
+  />
+
+
+  <link name="world" />  <!-- <joint name="onrobot_joint" type="fixed">
+    <parent link="tool0" />
+    <child link = "onrobot_rg2_base_link" />
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+  </joint> -->
+
+  <joint name="world_joint" type="fixed">
+    <parent link="world" />
+    <child link = "base_link" />
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+  </joint>
+
+    <!-- <xacro:arg name="use_nominal_extrinsics" default="false" />
+    <xacro:include filename="$(find realsense2_description)/urdf/_d435i.urdf.xacro"/>
+  <joint name="camera_joint" type="fixed">
+    <parent link="world" />
+    <child link = "sensor_d455_link" />
+     <origin xyz="-0.001 -0.059 1.010" rpy="0.029 0.030 0.549"/>
+  </joint> -->
+
+    <xacro:arg name="use_nominal_extrinsics" default="false" />
+    <xacro:include filename="$(find realsense2_description)/urdf/_d435i.urdf.xacro"/>
+    <xacro:sensor_d435i parent="tool0">
+    <origin xyz="-0.001 -0.059 0.010" rpy="1.57  -1.57  0"/>
+  </xacro:sensor_d435i>
+
+  <!-- <xacro:include filename = "$(find onrobot_rg2_visualization)/urdf/onrobot_rg2_model.xacro"/> -->
+  <!-- <link name="world" /> -->
+  
+  <!-- <joint name="onrobot_joint" type="fixed">
+    <parent link="tool0" />
+    <child link = "onrobot_rg2_base_link" />
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+  </joint>  -->
+
+  <!-- <xacro:include filename = "$(find ur5_end_box_urdf)/urdf/ur5_end_effector_box.xacro"/>
+  
+  <joint name="box_joint" type="fixed">
+    <parent link="tool0" />
+    <child link = "box_base" />
+    <origin xyz="0.0 0.0 0.26" rpy="0.0 1.5707 1.5707" />
+  </joint> -->
+
+</robot>
