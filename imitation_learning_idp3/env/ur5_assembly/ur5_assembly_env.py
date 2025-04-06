@@ -470,7 +470,7 @@ class UR5Env:
         R1 = R0.copy()
         planner0 = self.cal_planner(t0, R0, t1, R1, time0)
 
-        time1 = 2.0
+        time1 = 4.0
         t2 = t1.copy()
         self.hole_rt_end = np.zeros(3)
         self.hole_rt_end[0] = self.obj_t[0]
@@ -481,7 +481,7 @@ class UR5Env:
         R2 = R1.copy()
         planner1 = self.cal_planner(t1, R1, t2, R2, time1)
 
-        time2 = 2.0
+        time2 = 4.0
         t3 = t2.copy()
         t3[2] = t2[2] - 0.01
         R3 = R2.copy()
@@ -678,7 +678,7 @@ class UR5Env:
                                     velocityGain=1,
                                     physicsClientId = physicsClientId)
             j = j+1
-        self.wait_n_steps(240, physicsClientId)
+        self.wait_n_steps(120, physicsClientId)
 
     def control_jointsArray_to_target(self, robotID, pose_array, Jointindex, physicsClientId):
         p.setJointMotorControlArray(robotID, Jointindex,
