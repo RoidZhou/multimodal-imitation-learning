@@ -28,6 +28,7 @@ import cv2
 import sys
 from spatialmath import SE3
 import spatialmath as sm
+from scipy.spatial.transform import Rotation
 sys.path.append('../../../imitation_learning_idp3')
 from imitation_learning_idp3.arm.motion_planning import LinePositionParameter, OneAttitudeParameter, CartesianParameter, \
     QuinticVelocityParameter, TrajectoryParameter, TrajectoryPlanner
@@ -144,6 +145,32 @@ def get_quaternion_from_matrix(matrix, isprecise=False):
         np.negative(q, q)
     return q
 
+def quaternion_to_6d(quat: np.ndarray, order: str = 'xyzw') -> np.ndarray:
+    """
+    使用 scipy 将四元数转换为6D表示（旋转矩阵的前两列）。
+
+    参数:
+        quat: 四元数，形状为 [..., 4] (xyzw 或 wxyz 顺序)。
+        order: 四元数顺序，'xyzw' (默认) 或 'wxyz'。
+
+    返回:
+        6D向量，形状为 [..., 6]。
+    """
+    if order == 'wxyz':
+        quat = np.roll(quat, shift=-1, axis=-1)  # wxyz -> xyzw
+
+    # 使用 scipy 的 Rotation 类直接计算旋转矩阵
+    rot_matrix = Rotation.from_quat(quat).as_matrix()
+
+    # 取前两列并展平
+    return rot_matrix[..., :2].reshape(*rot_matrix.shape[:-2], 6)
+
+def _6d_to_quaternion(sixd: np.ndarray) -> np.ndarray:
+    rot_matrix = sixd.reshape(-1, 3, 2)
+    r3 = np.cross(rot_matrix[..., 0], rot_matrix[..., 1])
+    full_matrix = np.concatenate([rot_matrix, r3[..., None]], axis=-1)
+    return Rotation.from_matrix(full_matrix).as_quat()
+
 class DebugAxes(object):
     """
     可视化某个局部坐标系, 红色x轴, 绿色y轴, 蓝色z轴
@@ -169,9 +196,10 @@ class DebugAxes(object):
 
 class UR5Env:
     metadata = {'render.modes': ['human']}
-    def __init__(self, render=True):
+    def __init__(self, cfg, render=True):
         super().__init__()
         self.log =[]
+        self.action_dim = cfg.action.shape[0]
 
         self.randm_num = 1
         self.writer = SummaryWriter('./paperforceslog2')
@@ -309,6 +337,7 @@ class UR5Env:
         hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
         hole_orientation = p.getBasePositionAndOrientation(self.tool_id[0])[1]
         self.obj_t = hole_position
+        self.obj_r = hole_orientation
         # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
         # obs = self.get_observation()
         # observation_vw_shape = obs["achieved_goal"].shape
@@ -470,15 +499,17 @@ class UR5Env:
         R1 = R0.copy()
         planner0 = self.cal_planner(t0, R0, t1, R1, time0)
 
+        hole_matrix = np.eye(4)
+        # hole_matrix[:3, :3] = R.from_quat(self.obj_r).as_matrix()
+        hole_matrix[:3, :3] =  R.from_euler('xyz', [90, 90, -90], degrees=True).as_matrix()
+        hole_matrix[0, 3] = self.obj_t[0]
+        hole_matrix[1, 3] = self.obj_t[1]
+        hole_matrix[2, 3] = self.obj_t[2] + 0.08
+        T2 = SE3(hole_matrix)
+
         time1 = 4.0
-        t2 = t1.copy()
-        self.hole_rt_end = np.zeros(3)
-        self.hole_rt_end[0] = self.obj_t[0]
-        self.hole_rt_end[1] = self.obj_t[1]
-        self.hole_rt_end[2] = self.obj_t[2] + 0.057
-        t2[:] = self.hole_rt_end
-        t2[2] += 0.01
-        R2 = R1.copy()
+        t2 = T2.t
+        R2 = sm.SO3(T2.R)
         planner1 = self.cal_planner(t1, R1, t2, R2, time1)
 
         time2 = 4.0
@@ -502,8 +533,8 @@ class UR5Env:
         times = np.linspace(0, total_time, time_step_num)
         desired_poses = np.zeros((time_step_num, self.numdof))
 
-        states = np.zeros((every_epoch_num, 3))
-        actions = np.zeros((every_epoch_num, 3))
+        states = np.zeros((every_epoch_num, self.action_dim))
+        actions = np.zeros((every_epoch_num, self.action_dim))
         point_clouds = np.zeros((every_epoch_num, self.num_points, 6))
 
         time_cumsum = np.cumsum(time_array)
@@ -562,7 +593,8 @@ class UR5Env:
                 robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
                 # robot_state_transition = self.Visualize_rotation_center(robot_state_position[4], robot_state_position[5],
                 #                                                         relative_offset=[0.055, 0, 0], UI=False)
-                joint_state = robot_state_position[0]
+                state_position = robot_state_position[0]
+                state_orientation = robot_state_position[1]
 
                 # joint_state, _, _ = self.getJointStates(self.ur5_id, self.control_joint_ids)
                 self.control_joints_to_target(self.ur5_id_plan, list(desired_poses[time_num, :]), self.control_joint_ids, physicsClientId=self.physicsClient_plan)
@@ -570,12 +602,20 @@ class UR5Env:
                 # robot_transition_plan = self.Visualize_rotation_center(robot_position_plan[4], robot_position_plan[5],
                 #                                                        relative_offset=[0.055, 0, 0], UI=False)
                 peg_position = robot_position_plan[0]
+                peg_orientation = robot_position_plan[1]
+                peg_orientation_6d = quaternion_to_6d(peg_orientation, order='xyzw')
 
-                state = np.array(joint_state) # 3
-                action = peg_position
+                state_position = np.array(state_position) # 3
+                state_orientation = np.array(state_orientation) # 3
+                action_position = np.array(peg_position)
+                action_orientation = np.array(peg_orientation_6d)
 
-                states[data_num, ...] = state
-                actions[data_num, ...] = action
+                states[data_num, :3] = state_position
+                state_orientation_6d = quaternion_to_6d(state_orientation, order='xyzw')
+                states[data_num, 3:self.action_dim] = state_orientation_6d
+
+                actions[data_num, :3] = action_position
+                actions[data_num, 3:self.action_dim] = action_orientation
                 point_clouds[data_num, ...] = point_cloud
                 data_num += 1
 
@@ -603,14 +643,18 @@ class UR5Env:
         n_steps = self._timeStep // self.control_hz
         if action is not None:
             self.latest_action = action
+            action_position = np.array(action[0:3])
+            action_orientation_6d = np.array(action[3:self.action_dim])
+            action_orientation = _6d_to_quaternion(action_orientation_6d)
+
             for i in range(n_steps):
                 # ------------------------------------------求解器-------------------------------------------------------
 
                 self.target_joint = p.calculateInverseKinematics(
                     bodyUniqueId=self.ur5_id,
                     endEffectorLinkIndex=7,
-                    targetPosition=action,
-                    targetOrientation=list(self.peg_orientation),
+                    targetPosition=list(action_position),
+                    targetOrientation=list(action_orientation),
                     jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
                     physicsClientId=self.physicsClient_use)
 
@@ -741,7 +785,7 @@ class UR5Env:
         #                                                   roll = 0,
         #                                                   upAxisIndex = 2)
 
-
+        actions = np.zeros((self.action_dim))
         # intrinsics of the camera
         self.fov = 80
         aspect = float(self.image_width / self.image_height)
@@ -802,9 +846,14 @@ class UR5Env:
         # peg_transition = self.Visualize_rotation_center(robot_position[4], robot_position[5], relative_offset=[0.055, 0, 0], UI=False)
         self.peg_position = np.array(robot_position[0])
         self.peg_orientation = np.array(robot_position[1])
+        peg_orientation_6d = quaternion_to_6d(self.peg_orientation, order='xyzw')
+        action_position = np.array(self.peg_position)
+        action_orientation = np.array(peg_orientation_6d)
+        actions[0:3] = action_position
+        actions[3:self.action_dim] = action_orientation
 
         obs = {
-            'agent_pos': self.peg_position,
+            'agent_pos': actions,
             'point_cloud': sampled_points
         }
 

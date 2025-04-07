@@ -30,7 +30,7 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 def main(cfg: OmegaConf):
     OmegaConf.resolve(cfg)
     policy = hydra.utils.instantiate(cfg.policy)
-    env = hydra.utils.instantiate(cfg.task.env)
+    env = hydra.utils.instantiate(cfg.task.env, cfg.task.shape_meta)
     device = 'cuda:0'
     device = torch.device(device)
     policy.load_state_dict(torch.load("model_300.pth", map_location=device, pickle_module=dill))

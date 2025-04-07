@@ -43,7 +43,7 @@ def write_zarr(filename, point_clouds, states, actions, episode_ends):
 )
 def main(cfg: OmegaConf):
     OmegaConf.resolve(cfg)
-    env = hydra.utils.instantiate(cfg.task.env)
+    env = hydra.utils.instantiate(cfg.task.env, cfg.task.shape_meta)
 
     num = 50
 

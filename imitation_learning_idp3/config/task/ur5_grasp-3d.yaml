@@ -7,10 +7,10 @@ shape_meta:
       shape: [ 4096, 6 ]
       type: point_cloud
     agent_pos:
-      shape: [ 3 ]
+      shape: [ 9 ]
       type: low_dim
   action:
-    shape: [ 3 ]
+    shape: [ 9 ]
 
 dataset:
   _target_: imitation_learning_idp3.dataset.ur5_grasp_dataset_3d.UR5GraspDataset3D
