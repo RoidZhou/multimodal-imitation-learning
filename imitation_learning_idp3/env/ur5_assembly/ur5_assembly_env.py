@@ -507,12 +507,12 @@ class UR5Env:
         hole_matrix[2, 3] = self.obj_t[2] + 0.08
         T2 = SE3(hole_matrix)
 
-        time1 = 4.0
+        time1 = 6.0
         t2 = T2.t
         R2 = sm.SO3(T2.R)
         planner1 = self.cal_planner(t1, R1, t2, R2, time1)
 
-        time2 = 4.0
+        time2 = 6.0
         t3 = t2.copy()
         t3[2] = t2[2] - 0.01
         R3 = R2.copy()
