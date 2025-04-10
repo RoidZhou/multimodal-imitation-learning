@@ -35,7 +35,6 @@ class UR5GraspDataset3D(BaseDataset):
             'state', 
             'action',]
         
-        buffer_keys.append('point_cloud')
 
 
             
@@ -89,12 +88,9 @@ class UR5GraspDataset3D(BaseDataset):
 
     def _sample_to_data(self, sample):
         agent_pos = sample['state'][:,].astype(np.float32)
-        point_cloud = sample['point_cloud'][:,].astype(np.float32)
-        point_cloud = point_process.uniform_sampling_numpy(point_cloud, self.num_points)
         data = {
             'obs': {
                 'agent_pos': agent_pos,
-                'point_cloud': point_cloud,
                 },
             'action': sample['action'].astype(np.float32)}
            

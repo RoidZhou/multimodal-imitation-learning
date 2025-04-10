@@ -83,9 +83,9 @@ class DiffusionPointcloudPolicy(BasePolicy):
 
 
         model = ConditionalUnet1D(
-            input_dim=input_dim,
+            input_dim=input_dim, # 3
             local_cond_dim=None,
-            global_cond_dim=global_cond_dim,
+            global_cond_dim=global_cond_dim, # 384
             diffusion_step_embed_dim=diffusion_step_embed_dim,
             down_dims=down_dims,
             kernel_size=kernel_size,
@@ -237,10 +237,6 @@ class DiffusionPointcloudPolicy(BasePolicy):
         """
         # normalize input
         nobs = self.normalizer.normalize(obs_dict)
-        if not self.use_pc_color:
-            nobs['point_cloud'] = nobs['point_cloud'][..., :3]
-        if self.use_pc_color: # normalize color
-            nobs['point_cloud'][..., 3:] /= 255.0
         
         
         value = next(iter(nobs.values()))
@@ -318,10 +314,6 @@ class DiffusionPointcloudPolicy(BasePolicy):
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
 
-        if not self.use_pc_color:
-            nobs['point_cloud'] = nobs['point_cloud'][..., :3]
-        if self.use_pc_color: # normalize color
-            nobs['point_cloud'][..., 3:] /= 255.0
 
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]

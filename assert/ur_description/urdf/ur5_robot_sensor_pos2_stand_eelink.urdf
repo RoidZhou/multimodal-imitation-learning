@@ -347,7 +347,7 @@
       <geometry>
       <!-- <cylinder length="0.05" radius="0.00923"/> -->
       <!-- <cylinder length="0.05" radius="0.0094850000000"/>  -->
-       <cylinder length="0.05" radius="0.009480000000"/>
+       <cylinder length="0.05" radius="0.008980000000"/>
        <!-- <cylinder length="0.05" radius="0.009480000000"/> 8.12日用的参数，Both搜索-->
         <!-- <cylinder length="0.05" radius="0.0094850000000"/> 这是正好差0.5mm 仿真环境中非常难训练 -->
         <!-- <mesh filename="package://ur_description/meshes/ur5/collision/hold20J.STL"/> -->
@@ -363,7 +363,7 @@
     <collision>
       <geometry>
       <!-- <cylinder length="0.05" radius="0.0094850000000"/>  -->
-       <cylinder length="0.05" radius="0.009480000000"/>
+       <cylinder length="0.05" radius="0.008980000000"/>
        <!-- <cylinder length="0.05" radius="0.0094850000000"/> 这是正好差0.5mm 仿真环境中非常难训练-->
         <!-- <cylinder length="0.05" radius="0.00923"/> -->
         <!-- <mesh filename="package://ur_description/meshes/ur5/collision/hold20J.STL"/> -->

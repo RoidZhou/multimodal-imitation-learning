@@ -90,17 +90,14 @@ class iDP3Encoder(nn.Module):
                  ):
         super().__init__()
         self.state_key = 'agent_pos'
-        self.point_cloud_key = 'point_cloud'
         self.n_output_channels = pointcloud_encoder_cfg.out_channels
         
-        self.point_cloud_shape = observation_space[self.point_cloud_key]
         self.state_shape = observation_space[self.state_key]
 
         self.num_points = pointcloud_encoder_cfg.num_points # 4096
         
 
 
-        cprint(f"[iDP3Encoder] point cloud shape: {self.point_cloud_shape}", "yellow")
         cprint(f"[iDP3Encoder] state shape: {self.state_shape}", "yellow")
         
 
@@ -108,19 +105,8 @@ class iDP3Encoder(nn.Module):
         self.pointnet_type = pointnet_type
         
         self.downsample = point_downsample
-        if self.downsample:
-            self.point_preprocess = point_process.uniform_sampling_torch
-        else:
-            self.point_preprocess = nn.Identity()
         
         
-        
-        if pointnet_type == "multi_stage_pointnet":
-            from .multi_stage_pointnet import MultiStagePointNetEncoder
-            self.extractor = MultiStagePointNetEncoder(in_channels = pointcloud_encoder_cfg.in_channels, out_channels=pointcloud_encoder_cfg.out_channels)
-        else:
-            raise NotImplementedError(f"pointnet_type: {pointnet_type}")
-
 
         if len(state_mlp_size) == 0:
             raise RuntimeError(f"State mlp size is empty")
@@ -131,26 +117,16 @@ class iDP3Encoder(nn.Module):
         output_dim = state_mlp_size[-1]
 
         self.n_output_channels  += output_dim
-        self.state_mlp = nn.Sequential(*create_mlp(self.state_shape[0], output_dim, net_arch, state_mlp_activation_fn))
+        self.state_mlp = nn.Sequential(*create_mlp(self.state_shape[0], output_dim+128, net_arch, state_mlp_activation_fn))
 
         cprint(f"[DP3Encoder] output dim: {self.n_output_channels}", "red")
 
 
     def forward(self, observations: Dict) -> torch.Tensor:
-        points = observations[self.point_cloud_key]
-        assert len(points.shape) == 3, cprint(f"point cloud shape: {points.shape}, length should be 3", "red")
-
-        # points = torch.transpose(points, 1, 2)   # B * 3 * N
-        # points: B * 3 * (N + sum(Ni))
-        if self.downsample:
-            points = self.point_preprocess(points, self.num_points)
-           
-        pn_feat = self.extractor(points)    # B * out_channel
          
         state = observations[self.state_key]
         state_feat = self.state_mlp(state)  # B * 64
-        final_feat = torch.cat([pn_feat, state_feat], dim=-1)
-        return final_feat
+        return state_feat
 
 
     def output_shape(self):

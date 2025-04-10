@@ -7,15 +7,14 @@ shape_meta:
       shape: [ 4096, 6 ]
       type: point_cloud
     agent_pos:
-      shape: [ 3 ]
+      shape: [ 6 ]
       type: low_dim
   action:
     shape: [ 3 ]
 
 dataset:
   _target_: imitation_learning_idp3.dataset.ur5_grasp_dataset_3d.UR5GraspDataset3D
-#  zarr_path: ./data/ur5_grasp/ur5_grasp.zarr
-  zarr_path: ./data/ur5_assembly/ur5_assembly.zarr
+  zarr_path: ./data/ur5_assembly/ur5_assembly_force.zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}

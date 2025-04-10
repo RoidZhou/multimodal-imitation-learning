@@ -220,7 +220,7 @@ class UR5Env:
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态
         # self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.050115573329094,
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,接触桌面
-        self.init_joint_val =[-0.50195291679571792, -1.2151152721500111, -2.042115573329094, # 0.10195291679571792
+        self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.042115573329094,
                               -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,不接触桌面
         # 插孔是否失败阈值
         self.ftmax = [200, 100]
@@ -598,19 +598,177 @@ class UR5Env:
             'point_clouds': point_clouds
         }
 
+    def collect_force_dataset_delta_orien_improv(self, every_epoch_num):
+        # 初始化参数
+        target_angles = np.array([90, 90, -90])  # 目标姿态
+        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+        hole_pose = np.array(hole_position)
+        hole_pose[2] += 0.06
+
+        hole_orientation = Rotation.from_euler('xyz', [90, 90, -90], degrees=True).as_quat()  # 默认固定孔的姿态
+        hole_orie = np.array(hole_orientation)
+        # 移动到初始位姿
+        self.go(hole_pose, hole_orie)
+
+        # 移动到初始插接位姿
+        init_insert_depth = np.random.uniform(0.01, 0.04)
+        hole_pose[2] = hole_pose[2] - init_insert_depth  # 孔深度0.08
+        self.go(hole_pose, hole_orie)
+        FT = self.getForceTorque()
+        Fext = [FT[0], FT[1], FT[2]]
+        print("force : ", Fext)
+
+        # 数据存储结构优化
+        state_dim = 6  # 当前姿态误差(3) + 当前力/力矩(3)
+        action_dim = 3  # 姿态调整量(delta_x, delta_y, delta_z)
+
+        dataset = {
+            'states': np.zeros((every_epoch_num, state_dim)),
+            'actions': np.zeros((every_epoch_num, action_dim)),
+            'next_states': np.zeros((every_epoch_num, state_dim))
+        }
+
+        # 初始随机姿态
+        # 初始随机姿态（x在80-88或92-100，y在80-88或92-100，z固定-90）
+        current_angles = np.array([
+            np.random.choice([
+                np.random.uniform(90-10*1/(init_insert_depth*100), 88),
+                np.random.uniform(92, 90+10*1/(init_insert_depth*100))
+            ]),
+            np.random.choice([
+                np.random.uniform(90-10*1/(init_insert_depth*100), 88),
+                np.random.uniform(92, 90+10*1/(init_insert_depth*100))
+            ]),
+            -90  # z固定
+        ])
+
+        # 动态步长参数
+        base_step = 0.4
+        min_step = 0.1
+        step_decay = 0.9
+
+        for step in range(every_epoch_num):
+            # 计算当前状态
+            angle_error = current_angles - target_angles
+            current_quat = Rotation.from_euler('xyz', current_angles, degrees=True).as_quat()
+
+            # 获取当前力反馈
+            self.go(hole_pose, current_quat)
+            FT = self.getForceTorque()
+            current_force = np.array([FT[0], FT[1], FT[2]])
+
+            # 构建状态向量
+            current_state = np.concatenate([current_angles, current_force])
+
+            # 智能生成动作（姿态调整量）
+            angle_error_magnitude = np.linalg.norm(angle_error[:2])  # 只考虑x,y
+            adaptive_step = max(min_step, base_step * (step_decay ** (angle_error_magnitude / 10)))
+
+            # 核心改进：生成训练所需的delta_orientation
+            delta_angles = np.zeros(3)
+            for i in range(2):  # 只调整x,y
+                if angle_error[i] > 0:
+                    delta_angles[i] = -adaptive_step
+                else:
+                    delta_angles[i] = adaptive_step
+
+            # 添加探索噪声
+            if np.random.rand() < 0.3:
+                delta_angles[:2] += np.random.uniform(-0.5, 0.5, size=2)
+
+            # 执行动作
+            new_angles = current_angles + delta_angles
+            new_angles = np.clip(new_angles, [80, 80, -90], [100, 100, -90])
+
+            # 获取新状态
+            new_quat = Rotation.from_euler('xyz', new_angles, degrees=True).as_quat()
+            self.go(hole_pose, new_quat)
+            new_FT = self.getForceTorque()
+            force_magnitude = np.linalg.norm(new_FT[:3])
+
+            new_force = np.array([new_FT[0], new_FT[1], new_FT[2]])
+            new_angle_error = new_angles - target_angles
+            next_state = np.concatenate([new_angle_error, new_force])
+
+            print(
+                f"Current angles (x, y, z): [{new_angles[0]:.1f}, {new_angles[1]:.1f}, {new_angles[2]:.1f}] | "
+                f"Delta angles (x, y, z): [{delta_angles[0]:.1f}, {delta_angles[1]:.1f}, {delta_angles[2]:.1f}] | "
+                f"Force: {new_force} | Magnitude: {force_magnitude:.3f}"
+            )
+
+            # 存储transition
+            dataset['states'][step] = current_state
+            dataset['actions'][step] = delta_angles
+            dataset['next_states'][step] = next_state
+
+            # 更新状态
+            current_angles = new_angles
+
+            # 终止条件
+            if np.linalg.norm(new_force) < 0.1:
+                break
+
+        # 裁剪未使用的数据
+        # for k in dataset:
+        #     dataset[k] = dataset[k][:step + 1]
+
+        return dataset
+
+    def getForceTorque(self):
+        """
+        获取机器人当前关节力/力矩
+        """
+        FT = []
+        force = np.array(p.getJointState(self.ur5_id, 7)[2][0:3], dtype=float).reshape(3, 1)
+        torque = np.array(p.getJointState(self.ur5_id, 7)[2][3:6], dtype=float).reshape(3, 1)
+        FT = [force[0][0], force[1][0], force[2][0], torque[0][0], torque[1][0], torque[2][0]]
+        return FT
+
+    def go(self, target_pos, target_orie):
+        # ------------------------------------------求解器-------------------------------------------------------
+        self.target_robot_joint_angles = p.calculateInverseKinematics(
+            bodyUniqueId=self.ur5_id,
+            endEffectorLinkIndex=7,
+            targetPosition=target_pos,
+            targetOrientation=target_orie,
+            jointDamping=self.joint_damping, )
+
+        p.setJointMotorControlArray(self.ur5_id, [1, 2, 3, 4, 5, 6],
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=list(self.target_robot_joint_angles),
+                                    forces=np.array([87.0, 87.0, 87.0, 87.0, 60, 60]))
+
+        # ----------------------将更新频率设置为真实频率---------------------
+        p.setTimeStep(1.0 / self._timeStep)
+        for _ in range(300):
+
+            p.stepSimulation()
+
     def step(self, action):
         dt = 1.0 / self._timeStep
         n_steps = self._timeStep // self.control_hz
         if action is not None:
             self.latest_action = action
+            # 计算当前状态
+            robot_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            end_orn_euler = R.from_quat(robot_state[1]).as_euler('xyz', degrees=True)
+            robot_state_position = np.array(robot_state[0])
+            new_state_euler = end_orn_euler + action
+            action_quat = Rotation.from_euler('xyz', new_state_euler, degrees=True).as_quat()
+            FT = self.getForceTorque()
+            current_force = np.array([FT[0], FT[1], FT[2]])
+            print("---- force ---", current_force)
+            if np.linalg.norm(current_force) < 0.1:
+                robot_state_position[2] -= 0.002
+
             for i in range(n_steps):
                 # ------------------------------------------求解器-------------------------------------------------------
 
                 self.target_joint = p.calculateInverseKinematics(
                     bodyUniqueId=self.ur5_id,
                     endEffectorLinkIndex=7,
-                    targetPosition=action,
-                    targetOrientation=list(self.peg_orientation),
+                    targetPosition=robot_state_position,
+                    targetOrientation=list(action_quat),
                     jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
                     physicsClientId=self.physicsClient_use)
 
@@ -802,10 +960,13 @@ class UR5Env:
         # peg_transition = self.Visualize_rotation_center(robot_position[4], robot_position[5], relative_offset=[0.055, 0, 0], UI=False)
         self.peg_position = np.array(robot_position[0])
         self.peg_orientation = np.array(robot_position[1])
-
+        end_orn_euler = R.from_quat(robot_position[1]).as_euler('xyz', degrees=True)
+        FT = self.getForceTorque()
+        current_force = np.array([FT[0], FT[1], FT[2]])
+        # 构建状态向量
+        current_state = np.concatenate([end_orn_euler, current_force])
         obs = {
-            'agent_pos': self.peg_position,
-            'point_cloud': sampled_points
+            'agent_pos': current_state,
         }
 
         return obs

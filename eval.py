@@ -13,6 +13,8 @@ import open3d as o3d
 import pathlib
 from omegaconf import OmegaConf
 import hydra
+import pybullet as p
+from scipy.spatial.transform import Rotation as R
 
 sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode='w', buffering=1)
@@ -33,7 +35,7 @@ def main(cfg: OmegaConf):
     env = hydra.utils.instantiate(cfg.task.env)
     device = 'cuda:0'
     device = torch.device(device)
-    policy.load_state_dict(torch.load("model_300.pth", map_location=device, pickle_module=dill))
+    policy.load_state_dict(torch.load("model_600.pth", map_location=device, pickle_module=dill))
     policy.to(device)
     policy.eval()
 
@@ -42,13 +44,37 @@ def main(cfg: OmegaConf):
     horizon = cfg.horizon
 
     obs = env.reset()
-    point_cloud = np.zeros((1, horizon, *obs['point_cloud'].shape))
+    # 初始化参数
+    target_angles = np.array([90, 90, -90])  # 目标姿态
+    hole_position = p.getBasePositionAndOrientation(env.tool_id[0])[0]
+    hole_pose = np.array(hole_position)
+    hole_pose[2] += 0.06
+
+    hole_orientation = R.from_euler('xyz', [90, 90, -90], degrees=True).as_quat()  # 默认固定孔的姿态
+    hole_orie = np.array(hole_orientation)
+    # 移动到初始位姿
+    env.go(hole_pose, hole_orie)
+
+    # 移动到初始插接位姿
+    hole_pose[2] = hole_pose[2] - 0.015  # 孔深度0.08
+    env.go(hole_pose, hole_orie)
+
+    init_x_angle_err= np.random.uniform(-5, 5)
+    init_y_angle_err= np.random.uniform(-5, 5)
+
+    hole_orientation = R.from_euler('xyz', [90+init_x_angle_err, 90+init_y_angle_err, -90], degrees=True).as_quat()  # 默认固定孔的姿态
+    hole_orie = np.array(hole_orientation)
+    # 移动到初始位姿
+    env.go(hole_pose, hole_orie)
+
+    FT = env.getForceTorque()
+    Fext = [FT[0], FT[1], FT[2]]
+    print("force : ", Fext)
+    # point_cloud = np.zeros((1, horizon, *obs['point_cloud'].shape))
     agent_pos = np.zeros((1, horizon, *obs['agent_pos'].shape))
     for i in range(horizon):
-        point_cloud[0, i, ...] = obs['point_cloud']
         agent_pos[0, i, ...] = obs['agent_pos']
     observation = {}
-    observation['point_cloud'] = point_cloud
     observation['agent_pos'] = agent_pos
 
     done = False
@@ -58,10 +84,8 @@ def main(cfg: OmegaConf):
         step_start = time.time()
 
         if step_num % n_action_steps == 0:
-            observation['point_cloud'][0, 0:n_obs_steps - 1, ...] = observation['point_cloud'][0, 1:n_obs_steps, ...]
             observation['agent_pos'][0, 0:n_obs_steps - 1, ...] = observation['agent_pos'][0, 1:n_obs_steps, ...]
 
-            observation['point_cloud'][0, n_obs_steps - 1, ...] = obs['point_cloud']
             observation['agent_pos'][0, n_obs_steps - 1, ...] = obs['agent_pos']
 
             """ visualize point cloud """
