@@ -504,7 +504,8 @@ class UR5Env:
 
         states = np.zeros((every_epoch_num, 3))
         actions = np.zeros((every_epoch_num, 3))
-        point_clouds = np.zeros((every_epoch_num, self.num_points, 6))
+        images = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
+        depths = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
 
         time_cumsum = np.cumsum(time_array)
         joint_indices = []
@@ -549,7 +550,8 @@ class UR5Env:
 
             if time_num % every_step_num == 0:
                 obs = self.get_observation()
-                point_cloud = obs['point_cloud']
+                image = obs['image']
+                depth = obs['depth']
 
                 """ visualize point cloud """
                 # pcd = o3d.geometry.PointCloud()
@@ -576,7 +578,8 @@ class UR5Env:
 
                 states[data_num, ...] = state
                 actions[data_num, ...] = action
-                point_clouds[data_num, ...] = point_cloud
+                images[data_num, ...] = image
+                depths[data_num, ...] = depth
                 data_num += 1
 
             time_num += 1
@@ -595,7 +598,8 @@ class UR5Env:
         return {
             'states': states,
             'actions': actions,
-            'point_clouds': point_clouds
+            'images': images,
+            'depths': depths
         }
 
     def step(self, action):
@@ -805,7 +809,8 @@ class UR5Env:
 
         obs = {
             'agent_pos': self.peg_position,
-            'point_cloud': sampled_points
+            'image': rgb_image_3_channel,
+            'depth': depth_image_uint8
         }
 
         return obs

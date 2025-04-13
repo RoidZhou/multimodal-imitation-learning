@@ -16,7 +16,7 @@ from diffusion_policy_3d.workspace.base_workspace import BaseWorkspace
 from diffusion_policy_3d.policy.diffusion_pointcloud_policy import DiffusionPointcloudPolicy
 from diffusion_policy_3d.common.checkpoint_util import TopKCheckpointManager
 from diffusion_policy_3d.common.json_logger import JsonLogger
-from diffusion_policy_3d.common.pytorch_util import dict_apply, optimizer_to
+from diffusion_policy_3d.common.pytorch_util import dict_apply, optimizer_to, channels_first_collate_fn
 from diffusion_policy_3d.model.diffusion.ema_model import EMAModel
 from diffusion_policy_3d.model.common.lr_scheduler import get_scheduler
 from diffusion_policy_3d.workspace.idp3_workspace import iDP3Workspace
@@ -54,12 +54,12 @@ class SimpleIDP3Workspace(iDP3Workspace):
 
         # configure dataset
         dataset = hydra.utils.instantiate(cfg.task.dataset)
-        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        train_dataloader = DataLoader(dataset, **cfg.dataloader, collate_fn=channels_first_collate_fn)
         normalizer = dataset.get_normalizer()
 
         # configure validation dataset
         val_dataset = dataset.get_validation_dataset()
-        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
+        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader, collate_fn=channels_first_collate_fn)
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:

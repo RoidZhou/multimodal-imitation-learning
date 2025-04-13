@@ -18,16 +18,19 @@ os.environ['WANDB_SILENT'] = "True"
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
-def write_zarr(filename, point_clouds, states, actions, episode_ends):
+def write_zarr(filename, images, depths, states, actions, episode_ends):
     root = zarr.open(store=filename, mode='w')
     data_group = root.create_group('data')
-    data_group.create_dataset('point_cloud', shape=point_clouds.shape, dtype=point_clouds.dtype,
-                              chunks=(episode_ends[0], point_clouds.shape[1], point_clouds.shape[2]))
+    data_group.create_dataset('image', shape=images.shape, dtype=images.dtype,
+                              chunks=(episode_ends[0], images.shape[1], images.shape[2]))
+    data_group.create_dataset('depth', shape=depths.shape, dtype=depths.dtype,
+                              chunks=(episode_ends[0], depths.shape[1], depths.shape[2]))
     data_group.create_dataset('state', shape=states.shape, dtype=states.dtype,
                               chunks=(episode_ends[0], states.shape[1]))
     data_group.create_dataset('action', shape=actions.shape, dtype=actions.dtype,
                               chunks=(episode_ends[0], actions.shape[1]))
-    data_group['point_cloud'][:] = point_clouds
+    data_group['image'][:] = images
+    data_group['depth'][:] = depths
     data_group['state'][:] = states
     data_group['action'][:] = actions
 
@@ -48,6 +51,8 @@ def main(cfg: OmegaConf):
     num = 50
 
     point_clouds = np.array([])
+    images = np.array([])
+    depths = np.array([])
     states = np.array([])
     actions = np.array([])
     episode_ends = []
@@ -56,17 +61,19 @@ def main(cfg: OmegaConf):
         env.reset()
         data = env.run()
         if i == 0:
-            point_clouds = data['point_clouds']
+            images = data['images']
+            depths = data['depths']
             states = data['states']
             actions = data['actions']
         else:
-            point_clouds = np.vstack((point_clouds, data['point_clouds']))
+            images = np.vstack((images, data['images']))
+            depths = np.vstack((depths, data['depths']))
             states = np.vstack((states, data['states']))
             actions = np.vstack((actions, data['actions']))
         episode_ends.append(states.shape[0])
 
     filename = './data/ur5_assembly/ur5_assembly.zarr'
-    write_zarr(filename, point_clouds, states, actions, episode_ends)
+    write_zarr(filename, images, depths, states, actions, episode_ends)
 
 
 if __name__ == '__main__':

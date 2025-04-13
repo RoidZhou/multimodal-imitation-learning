@@ -42,13 +42,13 @@ def main(cfg: OmegaConf):
     horizon = cfg.horizon
 
     obs = env.reset()
-    point_cloud = np.zeros((1, horizon, *obs['point_cloud'].shape))
+    images = np.zeros((1, horizon, *np.transpose(obs['image'], (2,0,1)).shape))
     agent_pos = np.zeros((1, horizon, *obs['agent_pos'].shape))
     for i in range(horizon):
-        point_cloud[0, i, ...] = obs['point_cloud']
+        images[0, i, ...] = np.transpose(obs['image'], (2,0,1))
         agent_pos[0, i, ...] = obs['agent_pos']
     observation = {}
-    observation['point_cloud'] = point_cloud
+    observation['images'] = images
     observation['agent_pos'] = agent_pos
 
     done = False
@@ -58,10 +58,10 @@ def main(cfg: OmegaConf):
         step_start = time.time()
 
         if step_num % n_action_steps == 0:
-            observation['point_cloud'][0, 0:n_obs_steps - 1, ...] = observation['point_cloud'][0, 1:n_obs_steps, ...]
+            observation['images'][0, 0:n_obs_steps - 1, ...] = observation['images'][0, 1:n_obs_steps, ...]
             observation['agent_pos'][0, 0:n_obs_steps - 1, ...] = observation['agent_pos'][0, 1:n_obs_steps, ...]
 
-            observation['point_cloud'][0, n_obs_steps - 1, ...] = obs['point_cloud']
+            observation['images'][0, n_obs_steps - 1, ...] = np.transpose(obs['image'], (2,0,1))
             observation['agent_pos'][0, n_obs_steps - 1, ...] = obs['agent_pos']
 
             """ visualize point cloud """

@@ -80,3 +80,14 @@ def optimizer_to(optimizer, device):
             if isinstance(v, torch.Tensor):
                 state[k] = v.to(device=device)
     return optimizer
+
+def channels_first_collate_fn(batch):
+    collated_batch = {
+        'obs': {
+            'agent_pos': torch.stack([item['obs']['agent_pos'] for item in batch]),
+            'images': torch.stack([item['obs']['images'] for item in batch]).permute(0, 1, 4, 2, 3),
+            'depths': torch.stack([item['obs']['depths'] for item in batch]).permute(0, 1, 4, 2, 3)
+        },
+        'action': torch.stack([item['action'] for item in batch])
+    }
+    return collated_batch
