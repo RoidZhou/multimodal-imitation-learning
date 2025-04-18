@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="platform">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.00163296672357994 0.0270780507208766 1.89253350391043E-15"
+        rpy="0 0 0" />
+      <mass
+        value="0.411257327822529" />
+      <inertia
+        ixx="0.00036880518171087"
+        ixy="-3.64121593536832E-06"
+        ixz="1.2912666785549E-18"
+        iyy="0.000710408316959483"
+        iyz="-4.25568826458299E-18"
+        izz="0.000621390844941602" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/ur_description/urdf/platform/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/ur_description/urdf/platform/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

@@ -198,6 +198,7 @@ class UR5Env:
         self.Visualize_rotation_center_UI = DebugAxes()  # 可视化旋转中心
         self.goalPosition1 = DebugAxes()  # 可视化 eelink 坐标
         self.goalPosition_eelink = DebugAxes()  # 可视化 eelink 坐标
+        self.goalPosition_hole = DebugAxes()  # 可视化 eelink 坐标
 
         self.image_width = 320
         self.image_height = 240
@@ -220,8 +221,9 @@ class UR5Env:
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态
         # self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.050115573329094,
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,接触桌面
-        self.init_joint_val =[-0.50195291679571792, -1.2151152721500111, -2.042115573329094, # 0.10195291679571792
-                              -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,不接触桌面
+        init_end_orien = np.random.uniform(-0.5, 0.5)
+        self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.042115573329094, # 0.10195291679571792
+                              -1.4551581329978485, 1.5707963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
         # 插孔是否失败阈值
         self.ftmax = [200, 100]
         self.threshold = [150, 100]
@@ -275,14 +277,14 @@ class UR5Env:
         # 添加pybullet的额外数据地址，使程序可以直接调用到内部的一些模型
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
-        self.tool_id = p.loadSDF( "/home/zhou/autolab/peg-in-hole/888/file_recv/model/fangkuai/model.sdf")
+        self.tool_id = p.loadURDF( "./assert/ur_description/urdf/platform/urdf/platform.urdf", useFixedBase=1)
         """ 用于测试恒力跟踪"""
-        p.changeDynamics(self.tool_id[0], -1,
+        p.changeDynamics(self.tool_id, -1,
                          lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
 
         #  直的
-        p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32 + 0.08],
-                                          p.getQuaternionFromEuler([(3.145926 / 2), 0, 0]))#100宽度*100高*孔21
+        p.resetBasePositionAndOrientation(self.tool_id, [-0.4 + 0.05, 0.1 - 0.05, 0.32],
+                                          p.getQuaternionFromEuler([0, 0, 0]))#100宽度*100高*孔21
         self.init_height = 0.32+0.08
         self.goalPosition =[-0.4+0.05, 0.1-0.05, 0.32+0.08]
 
@@ -291,10 +293,10 @@ class UR5Env:
 
         # 添加机器人模型
         self.ur5_id = p.loadURDF(
-            "./assert/ur_description/urdf/ur5_robot_sensor_pos2_stand_eelink.urdf",
+            "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
             basePosition=[0, 0, 0.1], flags=9)
         self.ur5_id_plan = p.loadURDF(
-            "./assert/ur_description/urdf/ur5_robot_sensor_pos2_stand_eelink.urdf",
+            "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
             basePosition=[0, 0, 0.1], flags=9, physicsClientId = self.physicsClient_plan)
         self.ur5EndEffectorIndex = 7
         self.numdof = 6
@@ -306,9 +308,11 @@ class UR5Env:
                       [0,0,1,1]] # blue
 
         # p.changeVisualShape(self.ur5_id, 9, rgbaColor=link_color[2])
-        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
-        hole_orientation = p.getBasePositionAndOrientation(self.tool_id[0])[1]
+        hole_position = p.getBasePositionAndOrientation(self.tool_id)[0]
+        hole_orientation = p.getBasePositionAndOrientation(self.tool_id)[1]
         self.obj_t = hole_position
+        self.obj_r = hole_orientation
+        self.goalPosition_hole.update(hole_position, hole_orientation)
         # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
         # obs = self.get_observation()
         # observation_vw_shape = obs["achieved_goal"].shape
@@ -385,6 +389,8 @@ class UR5Env:
         p.stepSimulation()
 
         # --------------------------------------- 重置关节至初始状态------------------------------------这里有坑，p.resetJointState与p.setTimeStep()会导致初始姿态偏移
+        init_end_orien = np.random.uniform(-0.5, 0.5)
+        self.init_joint_val[5] += init_end_orien
         for i in range(6):
             p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.init_joint_val[i])
             p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.init_joint_val[i], physicsClientId=self.physicsClient_plan)
@@ -461,6 +467,8 @@ class UR5Env:
 
         end_peg_matrix = np.eye(4)
         end_peg_matrix[:3, :3] = R.from_quat(peg_orientation).as_matrix()
+        # hole_euler = R.from_quat(peg_orientation).as_euler('xyz',degrees=True)
+        # end_peg_matrix[:3, :3] = Rotation.from_euler('xyz', hole_euler).as_matrix()
         end_peg_matrix[:3, 3] = peg_position
 
         T0 = SE3(end_peg_matrix)
@@ -473,17 +481,25 @@ class UR5Env:
         time1 = 4.0
         t2 = t1.copy()
         self.hole_rt_end = np.zeros(3)
-        self.hole_rt_end[0] = self.obj_t[0]
-        self.hole_rt_end[1] = self.obj_t[1]
-        self.hole_rt_end[2] = self.obj_t[2] + 0.057
+        self.hole_rt_end[0] = self.obj_t[0] - 0.0015
+        self.hole_rt_end[1] = self.obj_t[1] - 0.027
+        self.hole_rt_end[2] = self.obj_t[2] + 0.10
         t2[:] = self.hole_rt_end
         t2[2] += 0.01
-        R2 = R1.copy()
+
+        end_peg_matrix1 = np.eye(4)
+        hole_orientation = Rotation.from_euler('xyz', [90, 90, -30], degrees=True).as_quat()  # 默认固定孔的姿态
+        peg_orientation = np.array(hole_orientation)
+        end_peg_matrix1[:3, :3] = R.from_quat(peg_orientation).as_matrix()
+        end_peg_matrix1[:3, 3] = self.hole_rt_end
+
+        T1 = SE3(end_peg_matrix1)
+        R2 = sm.SO3(T1.R)
         planner1 = self.cal_planner(t1, R1, t2, R2, time1)
 
         time2 = 4.0
         t3 = t2.copy()
-        t3[2] = t2[2] - 0.01
+        t3[2] = t2[2] - 0.005
         R3 = R2.copy()
         planner2 = self.cal_planner(t2, R2, t3, R3, time2)
 
@@ -722,14 +738,15 @@ class UR5Env:
         return trajectory_planner
 
     def get_observation(self):
-        self.camera_Position = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[0]
-        self.camera_Orientation = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[1]
+        self.camera_Position = p.getLinkState(self.ur5_id, 8, computeForwardKinematics=1)[0]
+        self.camera_Orientation = p.getLinkState(self.ur5_id, 8, computeForwardKinematics=1)[1]
         self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
-        self.cube_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+        self.cube_position = p.getBasePositionAndOrientation(self.tool_id)[0]
+        self.cube_position = [-0.35, 0.0 ,0.35]
         self.camera_in_world = [-0.6, 0.2, 0.7]
-        self.view_matrix = p.computeViewMatrix(cameraEyePosition = [self.camera_in_world[0],
-                                                                self.camera_in_world[1],
-                                                                self.camera_in_world[2]],
+        self.view_matrix = p.computeViewMatrix(cameraEyePosition = [self.camera_Position[0]-0.07,
+                                                                self.camera_Position[1]-0.07,
+                                                                self.camera_Position[2]+0.06],
                                             cameraTargetPosition = [self.cube_position[0],
                                                                     self.cube_position[1],
                                                                     self.cube_position[2]],
@@ -750,7 +767,7 @@ class UR5Env:
         self.fov = 80
         aspect = float(self.image_width / self.image_height)
         near = 0.001
-        far = 200.0
+        far = 20.0
         self.camera_matrix = np.array([
             [self.image_height / (2.0 * np.tan(self.fov / 2.0)), 0.0, self.image_width / 2.0],
             [0.0, self.image_height / (2.0 * np.tan(self.fov / 2.0)), self.image_height / 2.0],
@@ -819,7 +836,7 @@ class UR5Env:
         res = np.zeros(3)
         robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
         peg_position = self.Visualize_rotation_center(robot_position[4], robot_position[5], relative_offset=[0.055, 0, 0], UI=False)[0]
-        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+        hole_position = p.getBasePositionAndOrientation(self.tool_id)[0]
 
         robot_peg = np.array(peg_position)
         hole = np.array(hole_position)
