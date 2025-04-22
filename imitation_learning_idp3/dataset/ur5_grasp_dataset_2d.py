@@ -34,6 +34,7 @@ class UR5GraspDataset2D(BaseDataset):
             'action',]
 
         buffer_keys.append('image')
+        buffer_keys.append('image_hand')
         buffer_keys.append('depth')
 
             
@@ -78,6 +79,7 @@ class UR5GraspDataset2D(BaseDataset):
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
 
         normalizer['images'] = SingleFieldLinearNormalizer.create_identity()
+        normalizer['images_hand'] = SingleFieldLinearNormalizer.create_identity()
         normalizer['depths'] = SingleFieldLinearNormalizer.create_identity()
         normalizer['agent_pos'] = SingleFieldLinearNormalizer.create_identity()
         
@@ -89,11 +91,13 @@ class UR5GraspDataset2D(BaseDataset):
     def _sample_to_data(self, sample):
         agent_pos = sample['state'][:,].astype(np.float32)
         images = sample['image'][:,].astype(np.float32)
+        images_hand = sample['image_hand'][:,].astype(np.float32)
         depths = sample['depth'][:,].astype(np.float32)
         data = {
             'obs': {
                 'agent_pos': agent_pos,
                 'images': images,
+                'images_hand': images_hand,
                 'depths': depths
                 },
             'action': sample['action'].astype(np.float32)}

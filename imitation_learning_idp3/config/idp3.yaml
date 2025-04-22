@@ -85,7 +85,7 @@ ema:
 dataloader:
   # batch_size: 120
   batch_size: 40
-  num_workers: 8
+  num_workers: 0
   shuffle: True
   pin_memory: True
   persistent_workers: False
@@ -93,7 +93,7 @@ dataloader:
 val_dataloader:
   # batch_size: 120
   batch_size: 64
-  num_workers: 8
+  num_workers: 0
   shuffle: False
   pin_memory: True
   persistent_workers: False
@@ -153,7 +153,8 @@ hydra:
   job:
     override_dirname: ${name}
   run:
-    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    dir: data/outputs/2025.04.21/10.20.45_train_diffusion_unet_hybrid_ur5_grasp
+#    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
   sweep:
     dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
     subdir: ${hydra.job.num}

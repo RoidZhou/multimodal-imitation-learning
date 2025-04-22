@@ -6,11 +6,14 @@ shape_meta:
     images:
       shape: [ 3, 240, 320 ]
       type: rgb
+    images_hand:
+      shape: [ 3, 240, 320 ]
+      type: rgb
     agent_pos:
-      shape: [ 3 ]
+      shape: [ 9 ]
       type: low_dim
   action:
-    shape: [ 3 ]
+    shape: [ 9 ]
 
 dataset:
   _target_: imitation_learning_idp3.dataset.ur5_grasp_dataset_2d.UR5GraspDataset2D

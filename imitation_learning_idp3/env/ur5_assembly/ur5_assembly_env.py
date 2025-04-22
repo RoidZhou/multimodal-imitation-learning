@@ -144,6 +144,30 @@ def get_quaternion_from_matrix(matrix, isprecise=False):
         np.negative(q, q)
     return q
 
+def quaternion_to_6d(quat: np.ndarray, order: str = 'xyzw') -> np.ndarray:
+    """
+    使用 scipy 将四元数转换为6D表示（旋转矩阵的前两列）。
+    参数:
+        quat: 四元数，形状为 [..., 4] (xyzw 或 wxyz 顺序)。
+        order: 四元数顺序，'xyzw' (默认) 或 'wxyz'。
+    返回:
+        6D向量，形状为 [..., 6]。
+    """
+    if order == 'wxyz':
+        quat = np.roll(quat, shift=-1, axis=-1)  # wxyz -> xyzw
+    # 使用 scipy 的 Rotation 类直接计算旋转矩阵
+    rot_matrix = Rotation.from_quat(quat).as_matrix()
+    # 取前两列并展平
+
+    return rot_matrix[..., :2].reshape(*rot_matrix.shape[:-2], 6)
+
+def _6d_to_quaternion(sixd: np.ndarray) -> np.ndarray:
+    rot_matrix = sixd.reshape(-1, 3, 2)
+    r3 = np.cross(rot_matrix[..., 0], rot_matrix[..., 1])
+    full_matrix = np.concatenate([rot_matrix, r3[..., None]], axis=-1)
+
+    return Rotation.from_matrix(full_matrix).as_quat()
+
 class DebugAxes(object):
     """
     可视化某个局部坐标系, 红色x轴, 绿色y轴, 蓝色z轴
@@ -169,9 +193,10 @@ class DebugAxes(object):
 
 class UR5Env:
     metadata = {'render.modes': ['human']}
-    def __init__(self, render=True):
+    def __init__(self, cfg, render=True):
         super().__init__()
         self.log =[]
+        self.action_dim = cfg.action.shape[0]
 
         self.randm_num = 1
         self.writer = SummaryWriter('./paperforceslog2')
@@ -222,8 +247,8 @@ class UR5Env:
         # self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.050115573329094,
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,接触桌面
         init_end_orien = np.random.uniform(-0.5, 0.5)
-        self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.042115573329094, # 0.10195291679571792
-                              -1.4551581329978485, 1.5707963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
+        self.init_joint_val =[0.21195291679571792, -1.2151152721500111, -2.102115573329094, # 0.10195291679571792
+                              -1.4251581329978485, 1.5707963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
         # 插孔是否失败阈值
         self.ftmax = [200, 100]
         self.threshold = [150, 100]
@@ -277,13 +302,13 @@ class UR5Env:
         # 添加pybullet的额外数据地址，使程序可以直接调用到内部的一些模型
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
-        self.tool_id = p.loadURDF( "./assert/ur_description/urdf/platform/urdf/platform.urdf", useFixedBase=1)
+        self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
         """ 用于测试恒力跟踪"""
-        p.changeDynamics(self.tool_id, -1,
+        p.changeDynamics(self.tool_id[0], -1,
                          lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
 
         #  直的
-        p.resetBasePositionAndOrientation(self.tool_id, [-0.4 + 0.05, 0.1 - 0.05, 0.32],
+        p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32],
                                           p.getQuaternionFromEuler([0, 0, 0]))#100宽度*100高*孔21
         self.init_height = 0.32+0.08
         self.goalPosition =[-0.4+0.05, 0.1-0.05, 0.32+0.08]
@@ -308,8 +333,8 @@ class UR5Env:
                       [0,0,1,1]] # blue
 
         # p.changeVisualShape(self.ur5_id, 9, rgbaColor=link_color[2])
-        hole_position = p.getBasePositionAndOrientation(self.tool_id)[0]
-        hole_orientation = p.getBasePositionAndOrientation(self.tool_id)[1]
+        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+        hole_orientation = p.getBasePositionAndOrientation(self.tool_id[0])[1]
         self.obj_t = hole_position
         self.obj_r = hole_orientation
         self.goalPosition_hole.update(hole_position, hole_orientation)
@@ -389,8 +414,10 @@ class UR5Env:
         p.stepSimulation()
 
         # --------------------------------------- 重置关节至初始状态------------------------------------这里有坑，p.resetJointState与p.setTimeStep()会导致初始姿态偏移
-        init_end_orien = np.random.uniform(-0.5, 0.5)
+        init_end_orien = np.random.uniform(-1, 1)
+        init_joint0_orien = np.random.uniform(-0.1, 0.1)
         self.init_joint_val[5] += init_end_orien
+        # self.init_joint_val[0] += init_joint0_orien
         for i in range(6):
             p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.init_joint_val[i])
             p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.init_joint_val[i], physicsClientId=self.physicsClient_plan)
@@ -481,9 +508,9 @@ class UR5Env:
         time1 = 4.0
         t2 = t1.copy()
         self.hole_rt_end = np.zeros(3)
-        self.hole_rt_end[0] = self.obj_t[0] - 0.0015
+        self.hole_rt_end[0] = self.obj_t[0] - 0.0016
         self.hole_rt_end[1] = self.obj_t[1] - 0.027
-        self.hole_rt_end[2] = self.obj_t[2] + 0.10
+        self.hole_rt_end[2] = self.obj_t[2] + 0.098
         t2[:] = self.hole_rt_end
         t2[2] += 0.01
 
@@ -499,7 +526,7 @@ class UR5Env:
 
         time2 = 4.0
         t3 = t2.copy()
-        t3[2] = t2[2] - 0.005
+        t3[2] = t2[2] - 0.02
         R3 = R2.copy()
         planner2 = self.cal_planner(t2, R2, t3, R3, time2)
 
@@ -518,9 +545,10 @@ class UR5Env:
         times = np.linspace(0, total_time, time_step_num)
         desired_poses = np.zeros((time_step_num, self.numdof))
 
-        states = np.zeros((every_epoch_num, 3))
-        actions = np.zeros((every_epoch_num, 3))
+        states = np.zeros((every_epoch_num, self.action_dim))
+        actions = np.zeros((every_epoch_num, self.action_dim))
         images = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
+        images_hand = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
         depths = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
 
         time_cumsum = np.cumsum(time_array)
@@ -567,6 +595,7 @@ class UR5Env:
             if time_num % every_step_num == 0:
                 obs = self.get_observation()
                 image = obs['image']
+                image_hand = obs['image_hand']
                 depth = obs['depth']
 
                 """ visualize point cloud """
@@ -581,6 +610,8 @@ class UR5Env:
                 # robot_state_transition = self.Visualize_rotation_center(robot_state_position[4], robot_state_position[5],
                 #                                                         relative_offset=[0.055, 0, 0], UI=False)
                 joint_state = robot_state_position[0]
+                state_position = robot_state_position[0]
+                state_orientation = robot_state_position[1]
 
                 # joint_state, _, _ = self.getJointStates(self.ur5_id, self.control_joint_ids)
                 self.control_joints_to_target(self.ur5_id_plan, list(desired_poses[time_num, :]), self.control_joint_ids, physicsClientId=self.physicsClient_plan)
@@ -588,13 +619,23 @@ class UR5Env:
                 # robot_transition_plan = self.Visualize_rotation_center(robot_position_plan[4], robot_position_plan[5],
                 #                                                        relative_offset=[0.055, 0, 0], UI=False)
                 peg_position = robot_position_plan[0]
+                peg_orientation = robot_position_plan[1]
+                peg_orientation_6d = quaternion_to_6d(peg_orientation, order='xyzw')
 
-                state = np.array(joint_state) # 3
-                action = peg_position
+                state_position = np.array(state_position) # 3
+                state_orientation = np.array(state_orientation) # 3
 
-                states[data_num, ...] = state
-                actions[data_num, ...] = action
+                action_position = np.array(peg_position)
+                action_orientation = np.array(peg_orientation_6d)
+
+                states[data_num, :3] = state_position
+                state_orientation_6d = quaternion_to_6d(state_orientation, order='xyzw')
+                states[data_num, 3:self.action_dim] = state_orientation_6d
+                actions[data_num, :3] = action_position
+                actions[data_num, 3:self.action_dim] = action_orientation
+
                 images[data_num, ...] = image
+                images_hand[data_num, ...] = image_hand
                 depths[data_num, ...] = depth
                 data_num += 1
 
@@ -615,6 +656,7 @@ class UR5Env:
             'states': states,
             'actions': actions,
             'images': images,
+            'images_hand': images_hand,
             'depths': depths
         }
 
@@ -623,14 +665,17 @@ class UR5Env:
         n_steps = self._timeStep // self.control_hz
         if action is not None:
             self.latest_action = action
+            action_position = np.array(action[0:3])
+            action_orientation_6d = np.array(action[3:self.action_dim])
+            action_orientation = _6d_to_quaternion(action_orientation_6d)
             for i in range(n_steps):
                 # ------------------------------------------求解器-------------------------------------------------------
 
                 self.target_joint = p.calculateInverseKinematics(
                     bodyUniqueId=self.ur5_id,
                     endEffectorLinkIndex=7,
-                    targetPosition=action,
-                    targetOrientation=list(self.peg_orientation),
+                    targetPosition=list(action_position),
+                    targetOrientation=list(action_orientation),
                     jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
                     physicsClientId=self.physicsClient_use)
 
@@ -741,10 +786,22 @@ class UR5Env:
         self.camera_Position = p.getLinkState(self.ur5_id, 8, computeForwardKinematics=1)[0]
         self.camera_Orientation = p.getLinkState(self.ur5_id, 8, computeForwardKinematics=1)[1]
         self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
-        self.cube_position = p.getBasePositionAndOrientation(self.tool_id)[0]
+        self.cube_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
         self.cube_position = [-0.35, 0.0 ,0.35]
         self.camera_in_world = [-0.6, 0.2, 0.7]
-        self.view_matrix = p.computeViewMatrix(cameraEyePosition = [self.camera_Position[0]-0.07,
+        self.view_matrix = p.computeViewMatrix(
+                                            # cameraEyePosition = [self.camera_Position[0]-0.07,
+                                            #                     self.camera_Position[1]-0.07,
+                                            #                     self.camera_Position[2]+0.06],
+                                            cameraEyePosition=[self.camera_in_world[0],
+                                                               self.camera_in_world[1],
+                                                               self.camera_in_world[2]],
+                                            cameraTargetPosition = [self.cube_position[0],
+                                                                    self.cube_position[1],
+                                                                    self.cube_position[2]],
+                                            cameraUpVector = [0, 0, 1])
+        self.view_matrix_hand = p.computeViewMatrix(
+                                            cameraEyePosition = [self.camera_Position[0]-0.07,
                                                                 self.camera_Position[1]-0.07,
                                                                 self.camera_Position[2]+0.06],
                                             cameraTargetPosition = [self.cube_position[0],
@@ -762,7 +819,7 @@ class UR5Env:
         #                                                   roll = 0,
         #                                                   upAxisIndex = 2)
 
-
+        actions = np.zeros((self.action_dim))
         # intrinsics of the camera
         self.fov = 80
         aspect = float(self.image_width / self.image_height)
@@ -782,10 +839,17 @@ class UR5Env:
                                     viewMatrix = self.view_matrix,
                                     projectionMatrix = self.proj_matrix,
                                     renderer=p.ER_BULLET_HARDWARE_OPENGL)
-        assert (images[0] == self.image_width)
-        assert (images[1] == self.image_height)
+        images_hand = p.getCameraImage(width = self.image_width,
+                                    height = self.image_height,
+                                    viewMatrix = self.view_matrix_hand,
+                                    projectionMatrix = self.proj_matrix,
+                                    renderer=p.ER_BULLET_HARDWARE_OPENGL)
+        assert (images[0] == self.image_width or images_hand[0] == self.image_width)
+        assert (images[1] == self.image_height or images_hand[1] == self.image_height)
         rgb_image = np.reshape(images[2], (self.image_height, self.image_width, 4)) * 1. / 255.
+        rgb_image_hand = np.reshape(images_hand[2], (self.image_height, self.image_width, 4)) * 1. / 255.
         rgb_image_3_channel = np.uint8(rgb_image[:, :, :3] * 255)
+        rgb_image_hand_3_channel = np.uint8(rgb_image_hand[:, :, :3] * 255)
 
         rgb_image = rgb_image[:, :, :3].astype(np.float32)
         obs_image = np.uint8(cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY) * 255)
@@ -803,11 +867,12 @@ class UR5Env:
         depth_image_uint8 = np.expand_dims(depth_image_uint8, axis=2)
         assert (depth_image_uint8.shape == (self.image_height, self.image_width, 1))
         depth_image_3_channel = np.concatenate((depth_image_uint8, depth_image_uint8, depth_image_uint8), axis=2)
-        assert (rgb_image_3_channel.shape == (self.image_height, self.image_width, 3))
+        assert (rgb_image_3_channel.shape == (self.image_height, self.image_width, 3) or rgb_image_hand_3_channel.shape == (self.image_height, self.image_width, 3))
 
         """ save images """
-        cv2.imwrite("./eye_in_hand_rgb.jpg", rgb_image_3_channel)
-        cv2.imwrite("./eye_in_hand_depth.jpg", depth_image_uint8)
+        cv2.imwrite("./rgb_image_3_channel.jpg", rgb_image_3_channel)
+        cv2.imwrite("./rgb_image_hand_3_channel.jpg", rgb_image_hand_3_channel)
+        cv2.imwrite("./depth_image_uint8.jpg", depth_image_uint8)
 
         """ the observation can be changed to perform ablative studies"""
 
@@ -824,10 +889,18 @@ class UR5Env:
         self.peg_position = np.array(robot_position[0])
         self.peg_orientation = np.array(robot_position[1])
 
+        peg_orientation_6d = quaternion_to_6d(self.peg_orientation, order='xyzw')
+        action_position = np.array(self.peg_position)
+        action_orientation = np.array(peg_orientation_6d)
+        actions[0:3] = action_position
+        actions[3:self.action_dim] = action_orientation
+
         obs = {
-            'agent_pos': self.peg_position,
+            'agent_pos': actions,
             'image': rgb_image_3_channel,
-            'depth': depth_image_uint8
+            'image_hand': rgb_image_hand_3_channel,
+            'depth': depth_image_uint8,
+            'point_cloud': sampled_points
         }
 
         return obs
@@ -836,7 +909,7 @@ class UR5Env:
         res = np.zeros(3)
         robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
         peg_position = self.Visualize_rotation_center(robot_position[4], robot_position[5], relative_offset=[0.055, 0, 0], UI=False)[0]
-        hole_position = p.getBasePositionAndOrientation(self.tool_id)[0]
+        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
 
         robot_peg = np.array(peg_position)
         hole = np.array(hole_position)
