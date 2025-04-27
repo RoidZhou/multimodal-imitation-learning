@@ -33,7 +33,7 @@ def main(cfg: OmegaConf):
     env = hydra.utils.instantiate(cfg.task.env, cfg.task.shape_meta)
     device = 'cuda:0'
     device = torch.device(device)
-    policy.load_state_dict(torch.load("model_1200.pth", map_location=device, pickle_module=dill))
+    policy.load_state_dict(torch.load("model_300.pth", map_location=device, pickle_module=dill))
     policy.to(device)
     policy.eval()
 
@@ -84,7 +84,7 @@ def main(cfg: OmegaConf):
             """ visualize point cloud """
 
             actions = policy.predict_action(observation)['action'].cpu().detach().numpy()
-
+            print("actions : ", actions)
         action = actions[0, step_num % n_action_steps, :]
         obs, reward, done, info = env.step(action)
 

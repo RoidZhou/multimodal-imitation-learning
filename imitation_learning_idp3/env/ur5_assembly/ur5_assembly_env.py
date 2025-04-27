@@ -422,6 +422,21 @@ class UR5Env:
             p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.init_joint_val[i])
             p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.init_joint_val[i], physicsClientId=self.physicsClient_plan)
 
+        self.hole_up_end = np.zeros(3)
+        self.hole_up_end[0] = self.obj_t[0] - 0.0016
+        self.hole_up_end[1] = self.obj_t[1] - 0.027
+        self.hole_up_end[2] = self.obj_t[2] + 0.11
+        self.target_joint_angles = p.calculateInverseKinematics(
+            bodyUniqueId=self.ur5_id,
+            endEffectorLinkIndex=7,
+            targetPosition=self.hole_up_end,
+            jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+            physicsClientId=self.physicsClient_use)
+        for i in range(6):
+            p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.target_joint_angles[i])
+            p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.target_joint_angles[i], physicsClientId=self.physicsClient_plan)
+
+
         self.zero_Position = np.zeros(3)
         self.zero_Orientation = np.zeros(4)
 
@@ -505,38 +520,26 @@ class UR5Env:
         R1 = R0.copy()
         planner0 = self.cal_planner(t0, R0, t1, R1, time0)
 
-        time1 = 4.0
+        time1 = 6.0
         t2 = t1.copy()
-        self.hole_rt_end = np.zeros(3)
-        self.hole_rt_end[0] = self.obj_t[0] - 0.0016
-        self.hole_rt_end[1] = self.obj_t[1] - 0.027
-        self.hole_rt_end[2] = self.obj_t[2] + 0.098
-        t2[:] = self.hole_rt_end
-        t2[2] += 0.01
 
         end_peg_matrix1 = np.eye(4)
         hole_orientation = Rotation.from_euler('xyz', [90, 90, -30], degrees=True).as_quat()  # 默认固定孔的姿态
         peg_orientation = np.array(hole_orientation)
         end_peg_matrix1[:3, :3] = R.from_quat(peg_orientation).as_matrix()
-        end_peg_matrix1[:3, 3] = self.hole_rt_end
+        end_peg_matrix1[:3, 3] = self.peg_position
 
         T1 = SE3(end_peg_matrix1)
         R2 = sm.SO3(T1.R)
         planner1 = self.cal_planner(t1, R1, t2, R2, time1)
 
-        time2 = 4.0
-        t3 = t2.copy()
-        t3[2] = t2[2] - 0.02
-        R3 = R2.copy()
-        planner2 = self.cal_planner(t2, R2, t3, R3, time2)
-
         time3 = 0.5
-        t4 = t3.copy()
-        R4 = R3.copy()
-        planner3 = self.cal_planner(t3, R3, t4, R4, time3)
+        t3 = t2.copy()
+        R3 = R2.copy()
+        planner3 = self.cal_planner(t2, R2, t3, R3, time3)
 
-        time_array = np.array([0, time0, time1, time2, time3])
-        planner_array = [planner0, planner1, planner2, planner3]
+        time_array = np.array([0, time0, time1, time3])
+        planner_array = [planner0, planner1, planner3]
         total_time = np.sum(time_array)
 
         time_step_num = round(total_time * self._timeStep) + 1
@@ -585,6 +588,8 @@ class UR5Env:
             """ test desired_pose """
             # self.control_jointsArray_to_target(self.ur5_id, list(desired_poses[i, :]),
             #                                    joint_indices, physicsClientId=self.physicsClient_use)
+            # joint_position_test = [p.getJointState(self.ur5_id, i)[0] for i in joint_indices]
+            # print("test ok")
             """ test desired_pose """
 
         data_num = 0
@@ -628,11 +633,11 @@ class UR5Env:
                 action_position = np.array(peg_position)
                 action_orientation = np.array(peg_orientation_6d)
 
-                states[data_num, :3] = state_position
+                # states[data_num, :3] = state_position
                 state_orientation_6d = quaternion_to_6d(state_orientation, order='xyzw')
-                states[data_num, 3:self.action_dim] = state_orientation_6d
-                actions[data_num, :3] = action_position
-                actions[data_num, 3:self.action_dim] = action_orientation
+                states[data_num, 0:self.action_dim] = state_orientation
+                # actions[data_num, :3] = action_position
+                actions[data_num, 0:self.action_dim] = peg_orientation
 
                 images[data_num, ...] = image
                 images_hand[data_num, ...] = image_hand
@@ -651,7 +656,7 @@ class UR5Env:
                 time.sleep(time_until_next_step)
         # p.disconnect(physicsClientId=self.physicsClient_plan)
         # p.disconnect(physicsClientId=self.physicsClient_use)
-
+        joint_position = [p.getJointState(self.ur5_id, i)[0] for i in joint_indices]
         return {
             'states': states,
             'actions': actions,
@@ -665,9 +670,9 @@ class UR5Env:
         n_steps = self._timeStep // self.control_hz
         if action is not None:
             self.latest_action = action
-            action_position = np.array(action[0:3])
-            action_orientation_6d = np.array(action[3:self.action_dim])
-            action_orientation = _6d_to_quaternion(action_orientation_6d)
+            action_position = self.hole_up_end
+            action_orientation_6d = np.array(action[0:self.action_dim])
+            # action_orientation = _6d_to_quaternion(action_orientation_6d)
             for i in range(n_steps):
                 # ------------------------------------------求解器-------------------------------------------------------
 
@@ -675,7 +680,7 @@ class UR5Env:
                     bodyUniqueId=self.ur5_id,
                     endEffectorLinkIndex=7,
                     targetPosition=list(action_position),
-                    targetOrientation=list(action_orientation),
+                    targetOrientation=list(action_orientation_6d),
                     jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
                     physicsClientId=self.physicsClient_use)
 
@@ -684,6 +689,29 @@ class UR5Env:
                 self.control_joints_to_target(self.ur5_id, list(self.target_joint),
                                                    [1,2,3,4,5,6], physicsClientId=self.physicsClient_use)
 
+
+
+            # 计算当前状态
+            robot_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            robot_srate_orientation = np.array(robot_state[1])
+            end_orn_euler = R.from_quat(robot_state[1]).as_euler('xyz', degrees=True)
+            robot_state_position = np.array(robot_state[0])
+            FT = self.getForceTorque()
+            current_force = np.array([FT[0], FT[1], FT[2]])
+            print("---- force ---", current_force)
+
+            if np.linalg.norm(current_force) < 1000:
+                robot_state_position[2] -= 0.009
+
+                self.target_joint = p.calculateInverseKinematics(
+                    bodyUniqueId=self.ur5_id,
+                    endEffectorLinkIndex=7,
+                    targetPosition=list(robot_state_position),
+                    targetOrientation=list(robot_srate_orientation),
+                    jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+                    physicsClientId=self.physicsClient_use)
+                self.control_joints_to_target(self.ur5_id, list(self.target_joint),
+                                              [1, 2, 3, 4, 5, 6], physicsClientId=self.physicsClient_use)
 
         observation = self.get_observation()
         reward = 1
@@ -731,7 +759,7 @@ class UR5Env:
     def control_joints_to_target(self, robotID, jointPose, Jointindex, physicsClientId):
         j = 0
         for i in Jointindex:
-            forcemaxforce = 50
+            forcemaxforce = 500
             p.setJointMotorControl2(bodyUniqueId=robotID,
                                     jointIndex=i,
                                     controlMode=p.POSITION_CONTROL,
@@ -743,7 +771,36 @@ class UR5Env:
                                     velocityGain=1,
                                     physicsClientId = physicsClientId)
             j = j+1
-        self.wait_n_steps(120, physicsClientId)
+        self.wait_n_steps(240, physicsClientId)
+
+    def getForceTorque(self):
+        """
+        获取机器人当前关节力/力矩
+        """
+        FT = []
+        force = np.array(p.getJointState(self.ur5_id, 7)[2][0:3], dtype=float).reshape(3, 1)
+        torque = np.array(p.getJointState(self.ur5_id, 7)[2][3:6], dtype=float).reshape(3, 1)
+        FT = [force[0][0], force[1][0], force[2][0], torque[0][0], torque[1][0], torque[2][0]]
+        return FT
+
+    def go(self, target_pos, target_orie):
+        # ------------------------------------------求解器-------------------------------------------------------
+        self.target_robot_joint_angles = p.calculateInverseKinematics(
+            bodyUniqueId=self.ur5_id,
+            endEffectorLinkIndex=7,
+            targetPosition=target_pos,
+            targetOrientation=target_orie,
+            jointDamping=self.joint_damping, )
+
+        p.setJointMotorControlArray(self.ur5_id, [1, 2, 3, 4, 5, 6],
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=list(self.target_robot_joint_angles),
+                                    forces=np.array([87.0, 87.0, 87.0, 87.0, 60, 60]))
+
+        # ----------------------将更新频率设置为真实频率---------------------
+        p.setTimeStep(1.0 / self._timeStep)
+        for _ in range(300):
+            p.stepSimulation()
 
     def control_jointsArray_to_target(self, robotID, pose_array, Jointindex, physicsClientId):
         p.setJointMotorControlArray(robotID, Jointindex,
@@ -790,19 +847,19 @@ class UR5Env:
         self.cube_position = [-0.35, 0.0 ,0.35]
         self.camera_in_world = [-0.6, 0.2, 0.7]
         self.view_matrix = p.computeViewMatrix(
-                                            # cameraEyePosition = [self.camera_Position[0]-0.07,
-                                            #                     self.camera_Position[1]-0.07,
-                                            #                     self.camera_Position[2]+0.06],
-                                            cameraEyePosition=[self.camera_in_world[0],
-                                                               self.camera_in_world[1],
-                                                               self.camera_in_world[2]],
+                                            cameraEyePosition = [self.camera_Position[0]+0.07,
+                                                                self.camera_Position[1]+0.03,
+                                                                self.camera_Position[2]+0.06],
+                                            # cameraEyePosition=[self.camera_in_world[0],
+                                            #                    self.camera_in_world[1],
+                                            #                    self.camera_in_world[2]],
                                             cameraTargetPosition = [self.cube_position[0],
                                                                     self.cube_position[1],
                                                                     self.cube_position[2]],
                                             cameraUpVector = [0, 0, 1])
         self.view_matrix_hand = p.computeViewMatrix(
                                             cameraEyePosition = [self.camera_Position[0]-0.07,
-                                                                self.camera_Position[1]-0.07,
+                                                                self.camera_Position[1]-0.03,
                                                                 self.camera_Position[2]+0.06],
                                             cameraTargetPosition = [self.cube_position[0],
                                                                     self.cube_position[1],
@@ -892,8 +949,9 @@ class UR5Env:
         peg_orientation_6d = quaternion_to_6d(self.peg_orientation, order='xyzw')
         action_position = np.array(self.peg_position)
         action_orientation = np.array(peg_orientation_6d)
-        actions[0:3] = action_position
-        actions[3:self.action_dim] = action_orientation
+        # actions[0:3] = action_position
+        # actions[3:self.action_dim] = action_orientation
+        actions[0:self.action_dim] = self.peg_orientation
 
         obs = {
             'agent_pos': actions,

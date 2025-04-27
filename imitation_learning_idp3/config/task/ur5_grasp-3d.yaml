@@ -10,15 +10,15 @@ shape_meta:
       shape: [ 3, 240, 320 ]
       type: rgb
     agent_pos:
-      shape: [ 9 ]
+      shape: [ 4 ]
       type: low_dim
   action:
-    shape: [ 9 ]
+    shape: [ 4 ]
 
 dataset:
   _target_: imitation_learning_idp3.dataset.ur5_grasp_dataset_2d.UR5GraspDataset2D
 #  zarr_path: ./data/ur5_grasp/ur5_grasp.zarr
-  zarr_path: ./data/ur5_assembly/ur5_assembly.zarr
+  zarr_path: ./data/ur5_assembly/ur5_assembly_only_orien.zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
