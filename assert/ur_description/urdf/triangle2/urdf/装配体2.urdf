@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="triangle2">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="2.66411113095566E-18 0.0236991649839012 0.000674062132963851"
+        rpy="0 0 0" />
+      <mass
+        value="0.0149206757619702" />
+      <inertia
+        ixx="3.26440469252734E-06"
+        ixy="1.18460490810512E-22"
+        ixz="1.17639685366046E-22"
+        iyy="8.79598609441658E-07"
+        iyz="1.20605568921254E-08"
+        izz="3.26406312616221E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://triangle2/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://triangle2/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

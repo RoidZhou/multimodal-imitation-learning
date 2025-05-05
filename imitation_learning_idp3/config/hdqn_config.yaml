@@ -1,0 +1,104 @@
+horizon: 4
+obs_as_global_cond: True
+n_action_steps: 3
+n_obs_steps: 2
+model_path:
+  path: "/home/zhou/autolab/imitation_learning_idp3/model_380.pth"
+shape_meta:
+  # acceptable types: rgb, low_dim
+  obs:
+    images:
+      shape: [ 3, 240, 320 ]
+      type: rgb
+    images_hand:
+      shape: [ 3, 240, 320 ]
+      type: rgb
+    force:
+      shape: [ 3 ]
+      type: low_dim
+  action:
+    shape: [ 7 ]
+  feature:
+    shape: [ 2 ]
+# hDQN 代理的配置
+agent:
+  _target_: diffusion_policy_3d.policy.hdqn_mdp.hDQN  # 指定要实例化的类
+  num_goal: 6                      # 目标数量
+  num_action: 2                    # 动作数量
+  replay_memory_size: 10000        # 回放记忆大小
+  batch_size: 8                  # 批量大小
+
+  obs_encoder:                     # 观测编码器配置
+    _target_: diffusion_policy_3d.model.vision.multimodal_obs_encoder.MultiModalObsEncoder
+    shape_meta: ${shape_meta}
+    rgb_model:
+      _target_: diffusion_policy_3d.model.vision.model_getter.get_resnet
+      name: resnet18
+      weights: null
+    resize_shape: null
+    crop_shape: [76, 76]
+    # constant center crop
+    random_crop: True
+    use_group_norm: True
+    share_rgb_model: False
+    imagenet_norm: True
+
+policy_shape_meta:
+  # acceptable types: rgb, low_dim
+  obs:
+    images:
+      shape: [ 3, 240, 320 ]
+      type: rgb
+    images_hand:
+      shape: [ 3, 240, 320 ]
+      type: rgb
+    agent_pos:
+      shape: [ 4 ]
+      type: low_dim
+  action:
+    shape: [ 4 ]
+
+policy:
+  _target_: diffusion_policy_3d.policy.diffusion_unet_image_policy.DiffusionUnetImagePolicy
+
+  shape_meta: ${policy_shape_meta}
+
+  noise_scheduler:
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+    num_train_timesteps: 100
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: squaredcos_cap_v2
+    variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+    clip_sample: True # required when predict_epsilon=False
+    prediction_type: epsilon # or sample
+
+  obs_encoder:
+    _target_: diffusion_policy_3d.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
+    shape_meta: ${policy_shape_meta}
+    rgb_model:
+      _target_: diffusion_policy_3d.model.vision.model_getter.get_resnet
+      name: resnet18
+      weights: null
+    resize_shape: null
+    crop_shape: [76, 76]
+    # constant center crop
+    random_crop: True
+    use_group_norm: True
+    share_rgb_model: False
+    imagenet_norm: True
+
+  horizon: ${horizon}
+  n_action_steps: ${n_action_steps}
+  n_obs_steps: ${n_obs_steps}
+  num_inference_steps: 100
+  obs_as_global_cond: ${obs_as_global_cond}
+  # crop_shape: null
+  diffusion_step_embed_dim: 128
+  down_dims: [512, 1024, 2048]
+  kernel_size: 5
+  n_groups: 8
+  cond_predict_scale: True
+
+env:
+  _target_: imitation_learning_idp3.env.hdqn_env.mdp.UR5Env
