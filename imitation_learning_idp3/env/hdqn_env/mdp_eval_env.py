@@ -1,14 +1,48 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from gym import spaces
+import random
+class StochasticMDPEnv:
+
+    def __init__(self):
+        self.visited_six = False
+        self.current_state = 2
+        # number of actions (left: 0, right: 1)
+        self.nA = 2
+        # number of states
+        self.nS = 6
+
+    def reset(self):
+        self.visited_six = False
+        self.current_state = 2
+        return self.current_state
+
+    def step(self, action):
+        if self.current_state != 1:
+            # If "right" selected
+            if action == 1:
+                if random.random() < 0.5 and self.current_state < 6:
+                    self.current_state += 1
+                else:
+                    self.current_state -= 1
+            # If "left" selected
+            if action == 0:
+                self.current_state -= 1
+            # If state 6 reached
+            if self.current_state == 6:
+                self.visited_six = True
+        if self.current_state == 1:
+            if self.visited_six:
+                return self.current_state, 1.00, True, {}
+            else:
+                return self.current_state, 1.00/100.00, True, {}
+        else:
+            return self.current_state, 0.0, False, {}
 
 import skfuzzy as fuzz
-from numpy.ma.core import argmin
 from tensorboardX import SummaryWriter
 import gym
 from gym import error, spaces, utils
 import pybullet as p
 import pybullet_data
-import open3d as o3d
 import random
 import math
 from collections import namedtuple
@@ -17,6 +51,7 @@ from scipy.spatial.transform import Rotation as R
 import symbol
 from sympy import *
 from typing import Any, Dict, Union
+from ur5_realrobot_config import socket_TCp_UR30003,Forceusb
 sin = math.sin
 from scipy.spatial.transform import Rotation
 import transforms3d as tfs
@@ -29,10 +64,7 @@ import cv2
 import sys
 from spatialmath import SE3
 import spatialmath as sm
-sys.path.append('../../../imitation_learning_idp3')
-from imitation_learning_idp3.arm.motion_planning import LinePositionParameter, OneAttitudeParameter, CartesianParameter, \
-    QuinticVelocityParameter, TrajectoryParameter, TrajectoryPlanner
-
+from numpy.ma.core import argmin
 def fix_center_rotation(end_pos, end_orn, relative_offset, relative_euler, dy_M=0.055):
     """
        目的：固定点旋转
@@ -198,8 +230,8 @@ class UR5Env:
         super().__init__()
         self.log =[]
         self.action_dim = cfg.action.shape[0]
-        self.force_dim = 3
-
+        self.real = socket_TCp_UR30003()
+        self.Fusb = Forceusb()
         self.randm_num = 1
         self.writer = SummaryWriter('./paperforceslog2')
         self.mointor_force_torque = np.zeros((2, 60))
@@ -208,9 +240,8 @@ class UR5Env:
         self.all_number = 0  # 迭代次数
         self.epsiode_timesteps = 0
         self.max_steps_one_episode = 50#26
-        self.step_counter = 0
         self.goal_cont = 0
-
+        self.step_counter = 0
         self.quat_rot_err = np.zeros(4)
         self.current_twist_lin = np.zeros((3, 1))
         self.current_twist_ang = np.zeros((3, 1))
@@ -221,11 +252,18 @@ class UR5Env:
         self.obj_t = np.zeros(3)
         self.num_points = 4096 * 2
         self.control_hz = 100
+        self.prev_heght = 0
+        self.prev_angle_err = 30
+        self.goal_0_reach = 0
+        self.goal_1_reach = 0
+        self.goal = 0
+        self.arrive_orien_num = 0
 
         self.Visualize_rotation_center_UI = DebugAxes()  # 可视化旋转中心
         self.goalPosition1 = DebugAxes()  # 可视化 eelink 坐标
         self.goalPosition_eelink = DebugAxes()  # 可视化 eelink 坐标
         self.goalPosition_hole = DebugAxes()  # 可视化 eelink 坐标
+        self.writer = SummaryWriter('./HDQN_peg/logs')
 
         self.image_width = 320
         self.image_height = 240
@@ -250,7 +288,7 @@ class UR5Env:
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,接触桌面
         init_end_orien = np.random.uniform(-0.5, 0.5)
         self.init_joint_val =[0.21195291679571792, -1.2151152721500111, -2.102115573329094, # 0.10195291679571792
-                              -1.4251581329978485, 1.5707963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
+                              -1.4221581329978485, 1.5657963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
         # 插孔是否失败阈值
         self.ftmax = [200, 100]
         self.threshold = [150, 100]
@@ -340,6 +378,8 @@ class UR5Env:
         self.obj_t = hole_position
         self.obj_r = hole_orientation
         self.goalPosition_hole.update(hole_position, hole_orientation)
+
+
         # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
         # obs = self.get_observation()
         # observation_vw_shape = obs["achieved_goal"].shape
@@ -408,10 +448,38 @@ class UR5Env:
         p.setGravity(0, 0, 0)
 
     def reset(self):
+        self.goal_0_reach = 0
+        self.goal_1_reach = 0
         self.goal_cont=0
         self.randm_num += 1
         self.int_falg = True
+        self.arrive_orien_num = 0
         self.mointor_force_torque = np.zeros((2, 60))
+
+        # 安全设置
+        safe_pose= [0.29480578842411714, -1.2777899899535896, -2.002758482598918, -1.4319075968715884, 1.5708793527071245, 0.2942708693688756]
+        for i in range(6):
+            p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=safe_pose[i])
+
+        p.setJointMotorControlArray(self.ur5_id, [1, 2, 3, 4, 5, 6],
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=list(safe_pose),
+                                    forces=np.array([87.0, 87.0, 87.0, 87.0, 60, 60]))
+
+        # ----------------------将更新频率设置为真实频率---------------------
+        p.setTimeStep(1.0 / self._timeStep)
+        for _ in range(25):
+            p.stepSimulation()
+        self.real.movej(safe_pose)
+        time.sleep(3.5)
+
+        self.reset_Force_sensor()
+        # 安全设置结束
+        self.collsion_point=False
+        self.goal_cont=0
+        self.randm_num += 1
+        self.int_falg = True
+        self.mointor_force_torque = np.zeros((2, 90))
         p.enableJointForceTorqueSensor(self.ur5_id, 7)
         p.stepSimulation()
 
@@ -437,6 +505,12 @@ class UR5Env:
         for i in range(6):
             p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.target_joint_angles[i])
             p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.target_joint_angles[i], physicsClientId=self.physicsClient_plan)
+
+        # set hole terminal position and orientation
+        self.hole_true_orientation = Rotation.from_euler('xyz', [90, 90, -30], degrees=True).as_quat()  # 默认固定孔的姿态
+        self.hole_terminal_orientation = np.array(self.hole_true_orientation)
+        self.hole_terminal_position = np.array(self.hole_up_end)
+        self.hole_terminal_position[2] -= 0.06
 
 
         self.zero_Position = np.zeros(3)
@@ -484,6 +558,11 @@ class UR5Env:
         self.initial_distance = self.distance_to_goal()[2]
         self.initial_distance_rotation = self.distance_to_goal_rotation()
         self.max_step_count = 500
+        robot_current_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        self.robot_current_orientation = np.array(robot_current_state[1])
+        self.robot_current_position = np.array(robot_current_state[0])
+        self.robot_reset_position = self.robot_current_position
+        self.robot_reset_orientation = self.robot_current_orientation
 
         # 计算当前深度
         po = p.getLinkState(self.ur5_id, 7)
@@ -502,196 +581,21 @@ class UR5Env:
         # 返回初始的观测量
         return self.get_observation()
 
-    def run(self):
-        time0 = 0.001
-        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
-        # peg_transition = self.Visualize_rotation_center(robot_position[4], robot_position[5], relative_offset=[0.055, 0, 0], UI=False)
-        peg_position = robot_position[0]
-        peg_orientation = robot_position[1]
-
-        end_peg_matrix = np.eye(4)
-        end_peg_matrix[:3, :3] = R.from_quat(peg_orientation).as_matrix()
-        # hole_euler = R.from_quat(peg_orientation).as_euler('xyz',degrees=True)
-        # end_peg_matrix[:3, :3] = Rotation.from_euler('xyz', hole_euler).as_matrix()
-        end_peg_matrix[:3, 3] = peg_position
-
-        T0 = SE3(end_peg_matrix)
-        t0 = T0.t
-        R0 = sm.SO3(T0.R)
-        t1 = t0.copy()
-        R1 = R0.copy()
-        planner0 = self.cal_planner(t0, R0, t1, R1, time0)
-
-        time1 = 2.0
-        t2 = t1.copy()
-
-        end_peg_matrix1 = np.eye(4)
-        angles = []
-        angles_select = [-150, -30, 90, 210]
-        for i in range(4):
-            hole_orientation = Rotation.from_euler('xyz', [90, 90, -150+120*i], degrees=True).as_quat()  # 默认固定孔的姿态
-
-            robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
-            state_orientation = robot_state_position[1]
-            orientation_err = np.dot(hole_orientation, state_orientation)
-            orien_angle_err = 2*np.arccos(orientation_err)
-            angle_err = orien_angle_err*180/np.pi
-            angles.append(angle_err)
-        angle_target = angles_select[argmin(angles)]
-        hole_orientation = Rotation.from_euler('xyz', [90, 90, angle_target], degrees=True).as_quat()  # 默认固定孔的姿态
-
-        peg_orientation = np.array(hole_orientation)
-        end_peg_matrix1[:3, :3] = R.from_quat(peg_orientation).as_matrix()
-        end_peg_matrix1[:3, 3] = self.peg_position
-
-        T1 = SE3(end_peg_matrix1)
-        R2 = sm.SO3(T1.R)
-        planner1 = self.cal_planner(t1, R1, t2, R2, time1)
-
-        time3 = 0.5
-        t3 = t2.copy()
-        # t3[2] -= 0.007
-        R3 = R2.copy()
-        planner3 = self.cal_planner(t2, R2, t3, R3, time3)
-
-        time_array = np.array([0, time0, time1, time3])
-        planner_array = [planner0, planner1, planner3]
-        total_time = np.sum(time_array)
-
-        time_step_num = round(total_time * self._timeStep) + 1
-        every_step_num = 20
-        every_epoch_num = time_step_num // every_step_num
-        times = np.linspace(0, total_time, time_step_num)
-        desired_poses = np.zeros((time_step_num, self.numdof))
-
-        states = np.zeros((every_epoch_num, self.action_dim))
-        actions = np.zeros((every_epoch_num, self.action_dim))
-        images = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
-        images_hand = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
-        depths = np.zeros((every_epoch_num, self.image_height, self.image_width, 3))
-        forces = np.zeros((every_epoch_num, self.force_dim))
-        time_cumsum = np.cumsum(time_array)
-        joint_indices = []
-        for i in range(self.numjoint):
-            joint_info = p.getJointInfo(self.ur5_id, i)
-            if joint_info[2] != p.JOINT_FIXED:  # 过滤掉固定关节
-                joint_indices.append(i)
-        joint_position = [p.getJointState(self.ur5_id, i)[0] for i in joint_indices]
-
-        for i, timei in enumerate(times):
-            for j in range(len(time_cumsum)):
-                if timei < time_cumsum[j]:
-                    planner_interpolate = planner_array[j - 1].interpolate(timei - time_cumsum[j - 1])
-                    target_t = planner_interpolate.t
-                    target_r = planner_interpolate.R
-                    target_r = get_quaternion_from_matrix(target_r)
-
-                    target_r_xyzw = self.shift_array(list(target_r))
-                    # ------------------------------------------求解器-------------------------------------------------------
-                    self.target_joint_angles = p.calculateInverseKinematics(
-                                                        bodyUniqueId=self.ur5_id,
-                                                        endEffectorLinkIndex=7,
-                                                        targetPosition=target_t,
-                                                        targetOrientation=target_r_xyzw,
-                                                        restPoses=joint_position,
-                                                        jointDamping = [0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
-                                                        physicsClientId=self.physicsClient_use)
-
-                    joint_position = self.target_joint_angles
-                    break
-
-            desired_poses[i, :] = joint_position
-            """ test desired_pose """
-            # self.control_jointsArray_to_target(self.ur5_id, list(desired_poses[i, :]),
-            #                                    joint_indices, physicsClientId=self.physicsClient_use)
-            # joint_position_test = [p.getJointState(self.ur5_id, i)[0] for i in joint_indices]
-            # print("test ok")
-            # FT = self.getForceTorque()
-            """ test desired_pose """
-
-        data_num = 0
-        time_num = 0
-        while p.isConnected():
-            step_start = time.time()
-
-            if time_num % every_step_num == 0:
-                obs = self.get_observation()
-                image = obs['image']
-                image_hand = obs['image_hand']
-                depth = obs['depth']
-                force = obs['force']
-
-                """ visualize point cloud """
-                # pcd = o3d.geometry.PointCloud()
-                # pcd.points = o3d.utility.Vector3dVector(point_cloud[:, :3])
-                # pcd.colors = o3d.utility.Vector3dVector(point_cloud[:, 3:] / 255.0)
-                # o3d.visualization.draw_geometries([pcd])
-                """ visualize point cloud """
-
-                joints_info = self.setup_control_joint(self.ur5_id, self.robot_control_joint_name)
-                robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
-                # robot_state_transition = self.Visualize_rotation_center(robot_state_position[4], robot_state_position[5],
-                #                                                         relative_offset=[0.055, 0, 0], UI=False)
-                joint_state = robot_state_position[0]
-                state_position = robot_state_position[0]
-                state_orientation = robot_state_position[1]
-
-                # joint_state, _, _ = self.getJointStates(self.ur5_id, self.control_joint_ids)
-                self.control_joints_to_target(self.ur5_id_plan, list(desired_poses[time_num, :]), self.control_joint_ids, physicsClientId=self.physicsClient_plan)
-                robot_position_plan = p.getLinkState(self.ur5_id_plan, self.ur5EndEffectorIndex, computeForwardKinematics=1, physicsClientId=self.physicsClient_plan)
-                # robot_transition_plan = self.Visualize_rotation_center(robot_position_plan[4], robot_position_plan[5],
-                #                                                        relative_offset=[0.055, 0, 0], UI=False)
-                peg_position = robot_position_plan[0]
-                peg_orientation = robot_position_plan[1]
-                peg_orientation_6d = quaternion_to_6d(peg_orientation, order='xyzw')
-
-                state_position = np.array(state_position) # 3
-                state_orientation = np.array(state_orientation) # 3
-
-                action_position = np.array(peg_position)
-                action_orientation = np.array(peg_orientation_6d)
-
-                # states[data_num, :3] = state_position
-                state_orientation_6d = quaternion_to_6d(state_orientation, order='xyzw')
-                states[data_num, 0:self.action_dim] = state_orientation
-                # actions[data_num, :3] = action_position
-                actions[data_num, 0:self.action_dim] = peg_orientation
-
-                images[data_num, ...] = image
-                images_hand[data_num, ...] = image_hand
-                depths[data_num, ...] = depth
-                forces[data_num, ...] = force
-                data_num += 1
-
-            time_num += 1
-            if time_num >= time_step_num - every_step_num:
-                break
-
-            self.control_joints_to_target(self.ur5_id, desired_poses[time_num, :], self.control_joint_ids,
-                                          physicsClientId=self.physicsClient_use)
-
-            time_until_next_step = 1/self._timeStep - (time.time() - step_start)
-            if time_until_next_step > 0:
-                time.sleep(time_until_next_step)
-        # p.disconnect(physicsClientId=self.physicsClient_plan)
-        # p.disconnect(physicsClientId=self.physicsClient_use)
-        joint_position = [p.getJointState(self.ur5_id, i)[0] for i in joint_indices]
-        return {
-            'states': states,
-            'actions': actions,
-            'images': images,
-            'images_hand': images_hand,
-            'depths': depths,
-            'forces': forces
-        }
-
     def step(self, action):
+        self.step_counter += 1
         dt = 1.0 / self._timeStep
         n_steps = self._timeStep // self.control_hz
         if action is not None:
-            self.latest_action = action
-            action_position = self.hole_up_end
-            action_orientation_6d = np.array(action[0:self.action_dim])
+            # action_position = self.hole_up_end
+            robot_prev_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            self.robot_prev_orientation = np.array(robot_prev_state[1])
+            self.robot_prev_position = np.array(robot_prev_state[0])
+            position_prev_err = np.sqrt(np.sum((self.hole_terminal_position - self.robot_prev_position) ** 2))
+            orientation_prev_err = np.sqrt(np.sum((self.hole_terminal_orientation - self.robot_prev_orientation) ** 2))
+            self.prev_height = self.robot_prev_position[2]
+
+            action_position = np.array(action[0:3])
+            action_orientation_6d = np.array(action[3:self.action_dim])
             # action_orientation = _6d_to_quaternion(action_orientation_6d)
             for i in range(n_steps):
                 # ------------------------------------------求解器-------------------------------------------------------
@@ -718,9 +622,9 @@ class UR5Env:
             robot_state_position = np.array(robot_state[0])
             FT = self.getForceTorque()
             current_force = np.array([FT[0], FT[1], FT[2]])
-            print("---- force ---", current_force)
+            # print("---- force ---", current_force)
 
-            if np.linalg.norm(current_force[2]) < -10:
+            if np.linalg.norm(current_force) < -1:
                 robot_state_position[2] -= 0.009
 
                 self.target_joint = p.calculateInverseKinematics(
@@ -733,10 +637,144 @@ class UR5Env:
                 self.control_joints_to_target(self.ur5_id, list(self.target_joint),
                                               [1, 2, 3, 4, 5, 6], physicsClientId=self.physicsClient_use)
 
+            robot_current_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            self.robot_current_orientation = np.array(robot_current_state[1])
+            self.robot_current_position = np.array(robot_current_state[0])
+
+        pose_err = action_position - self.robot_current_position
         observation = self.get_observation()
-        reward = 1
+        # if pose_err[2] > 0:
+            # print("peg move down", pose_err[2])
         done = False
         info = None
+        reward = 0
+
+        pose_err = self.robot_current_position - self.robot_prev_position
+        insert_depth = self.robot_reset_position[2] - self.robot_current_position[2]
+        orientation_err = np.dot(self.robot_prev_orientation, self.robot_current_orientation)
+        orien_angle_err = 2*np.arccos(orientation_err)
+        angle_err = orien_angle_err * 180 / np.pi
+
+        angles = []
+        angles_select = [-150, -30, 90, 210]
+        for i in range(4):
+            hole_orientation = Rotation.from_euler('xyz', [90, 90, -150+120*i], degrees=True).as_quat()  # 默认固定孔的姿态
+
+            robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            state_orientation = robot_state_position[1]
+            orientation_err = np.dot(hole_orientation, state_orientation)
+            orien_angle_err = 2*np.arccos(orientation_err)
+            angle_err = orien_angle_err*180/np.pi
+            angles.append(angle_err)
+
+        # if insert_depth > 0.007:
+        #     done = True
+        #     reward = 10
+        #     return observation, reward, done, info
+
+        if self.goal == 0:
+            if min(angles) < 1 and self.goal_0_reach == 0:
+                self.goal_0_reach = 1
+                reward = 1
+            if insert_depth > 0.004 and self.goal_0_reach == 0:
+                self.goal_0_reach = 1
+                reward = 1
+        if self.goal == 1:
+            # if self.goal_0_reach == 0:
+            #     done = True
+            #     reward = 0
+            if insert_depth > 0.004:
+                # done = True
+                reward = 2
+                self.goal_1_reach = 1
+            if insert_depth > 0.007:
+                done = True
+                reward = 3
+            if abs(current_force[2]) < 10 and self.goal_1_reach == 0 and self.goal_0_reach == 1:
+                reward = 0.1
+            elif abs(current_force[2]) < 100 and self.goal_1_reach == 0 and self.goal_0_reach == 1:
+                reward = -0
+            elif abs(current_force[2]) > 100 and self.goal_0_reach == 0:
+                reward = -0
+                done = True
+            elif abs(current_force[2]) > 100 and self.goal_0_reach == 1 and self.goal_1_reach == 0:
+                reward = -0
+
+        if self.goal == 2:
+            if self.goal_0_reach == 0 or self.goal_1_reach == 0:
+                done = True
+                reward = 0
+            if insert_depth > 0.007:
+                done = True
+                reward = 3
+        if self.step_counter > 100:
+            done = True
+            print("step counter arrive")
+
+        # ----  以下全部注释  -----
+        # orientation_err = np.dot(self.hole_terminal_orientation, self.robot_current_orientation)
+        # orien_angle_err = 2*np.arccos(orientation_err)
+        # angle_err = orien_angle_err*180/np.pi
+        # target_angle = self.find_nearest_target(angle_err)
+        # if self.is_angle_close(angle_err,tolerance=1):
+        #     done = True
+        #     self.goal_0_reach = 1
+        #     reward = 10
+        #
+        #     if current_force[2] < 100:
+        #         robot_state_position[2] -= 0.009
+        #
+        #         self.target_joint = p.calculateInverseKinematics(
+        #             bodyUniqueId=self.ur5_id,
+        #             endEffectorLinkIndex=7,
+        #             targetPosition=list(robot_state_position),
+        #             targetOrientation=list(robot_srate_orientation),
+        #             jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+        #             physicsClientId=self.physicsClient_use)
+        #         self.control_joints_to_target(self.ur5_id, list(self.target_joint),
+        #                                       [1, 2, 3, 4, 5, 6], physicsClientId=self.physicsClient_use)
+        #
+        #     robot_current_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        #     self.robot_current_orientation = np.array(robot_current_state[1])
+        #     self.robot_current_position = np.array(robot_current_state[0])
+        #
+        #     pose_err = action_position - self.robot_current_position
+        #     observation = self.get_observation()
+        #
+        #     return observation, reward, done, info
+        # else:
+        #     curr_angle_err = abs(target_angle - angle_err)
+        #     if self.prev_angle_err is None:
+        #         self.prev_angle_err = curr_angle_err
+        #     reward = self.prev_angle_err - curr_angle_err
+        #     # reward = 0
+        #
+        #
+        # position_curr_err = np.sqrt(np.sum((self.hole_terminal_position - self.robot_current_position)**2))
+        # total_pose_err = -(position_prev_err - position_curr_err)
+        # total_orien_err = (orientation_prev_err - orientation_err)
+        # self.curr_height = self.robot_current_position[2]
+        # self.height_err = self.prev_height - self.curr_height
+        # # if total_pose_err>0 or total_orien_err>0:
+        # #     done = True
+        # FT = self.getForceTorque()
+        # current_force = np.array([FT[0], FT[1], FT[2]])
+        # if np.max(abs(current_force)) > 10000:
+        #     done = True
+        #     print("max force: ", current_force)
+        # if self.step_counter > 100:
+        #     done = True
+        #     print("step counter arrive")
+        # if (self.height_err > 0 and current_force[2]< 50) :
+        #     reward = 1
+        #     if position_curr_err < 0.055:
+        #         done = True
+        #         reward = 10
+        #
+        # if current_force[2] > 50:
+        #     done = True
+        #
+        # self.prev_angle_err = curr_angle_err
 
         return observation, reward, done, info
 
@@ -747,6 +785,35 @@ class UR5Env:
         arr.append(first_ele)
 
         return arr
+
+    def is_almost_integer(self, k, epsilon=0.05):
+        """检查 k 是否在某个整数的附近（允许误差 epsilon）"""
+        n = round(k)  # 最近的整数
+        return abs(k - n) <= epsilon
+
+    def is_angle_close(self, angle_err, tolerance=1):
+        """
+        检查 angle_err 是否以 ±tolerance 的误差靠近目标角度 [0, 120, 240, 360]。
+        - angle_err: 当前角度（0~360）
+        - tolerance: 允许的误差（默认 ±1°）
+        - 返回: True（靠近）或 False（不靠近）
+        """
+        target_angles = np.array([0, 120, 240, 360])  # 目标角度列表
+
+        # 计算 angle_err 与所有 target_angles 的绝对差值（考虑 360° 环绕）
+        diffs = np.abs((angle_err - target_angles + 180) % 360 - 180)
+
+        # 取最小差值
+        min_diff = np.min(diffs)
+
+        # 判断是否在容差范围内
+        return min_diff <= tolerance
+
+    def find_nearest_target(self, theta):
+        """找到离 theta 最近的目标角度（30°, 90°, 150°, ...）"""
+        targets = np.array([0, 120, 240, 360])
+        nearest_target = targets[np.argmin(np.abs(targets - theta))]
+        return nearest_target
 
     def setup_control_joint(self, robotID, ControlJoints):
         jointTypeList = ["REVOLUTE", "PRISMATIC", "SPHERICAL", "PLANAR", "FIXED"]
@@ -791,7 +858,7 @@ class UR5Env:
                                     velocityGain=1,
                                     physicsClientId = physicsClientId)
             j = j+1
-        self.wait_n_steps(240, physicsClientId)
+        self.wait_n_steps(120, physicsClientId)
 
     def getForceTorque(self):
         """
@@ -849,15 +916,6 @@ class UR5Env:
         indices = np.random.permutation(filtered_points.shape[0])[:self.num_points]
         sampled_points = filtered_points[indices, :]
         return sampled_points
-
-    def cal_planner(self, t0, R0, t1, R1, time):
-        position_parameter = LinePositionParameter(t0, t1)
-        attitude_parameter = OneAttitudeParameter(R0, R1)
-        cartesian_parameter = CartesianParameter(position_parameter, attitude_parameter)
-        velocity_parameter = QuinticVelocityParameter(time)
-        trajectory_parameter = TrajectoryParameter(cartesian_parameter, velocity_parameter)
-        trajectory_planner = TrajectoryPlanner(trajectory_parameter)
-        return trajectory_planner
 
     def get_observation(self):
         self.camera_Position = p.getLinkState(self.ur5_id, 8, computeForwardKinematics=1)[0]
@@ -966,14 +1024,13 @@ class UR5Env:
         self.peg_position = np.array(robot_position[0])
         self.peg_orientation = np.array(robot_position[1])
 
-        peg_orientation_6d = quaternion_to_6d(self.peg_orientation, order='xyzw')
+        # peg_orientation_6d = quaternion_to_6d(self.peg_orientation, order='xyzw')
         action_position = np.array(self.peg_position)
-        action_orientation = np.array(peg_orientation_6d)
-        # actions[0:3] = action_position
-        # actions[3:self.action_dim] = action_orientation
-        actions[0:self.action_dim] = self.peg_orientation
+        action_orientation = np.array(self.peg_orientation)
+        actions[0:3] = action_position
+        actions[3:self.action_dim] = action_orientation
+        # actions[0:self.action_dim] = self.peg_orientation
         force = np.array(self.getForceTorque()[:3])
-
         obs = {
             'agent_pos': actions,
             'image': rgb_image_3_channel,
@@ -1057,3 +1114,16 @@ class UR5Env:
             self.Visualize_rotation_center_UI.update(peg_link_pos, peg_link_Quaternion)
 
         return [peg_link_pos, peg_link_Quaternion]
+
+    def reset_Force_sensor(self):
+        '''传感器重新连接，自动置零'''
+        A = True
+        time.sleep(2)
+        while A == True:
+            try:
+                self.Fusb.close()
+                self.Fusb = Forceusb()
+                A = False
+            except:
+                time.sleep(0.5)
+                A = True

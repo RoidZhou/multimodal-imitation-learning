@@ -62,74 +62,98 @@ def hdqn_learning(
     meta_timestep = 0
     ctrl_timestep = defaultdict(int)
 
-    for i_thousand_episode in range(n_thousand_episode):
-        for i_episode in range(1000):
-            episode_length = 0
-            obs = env.reset()
-            obs0 = obs
-            # visits[i_thousand_episode][current_state-1] += 1
-            # encoded_current_state = one_hot_state(current_state)
+    # for i_thousand_episode in range(n_thousand_episode):
+    # for i_episode in range(1000):
+    episode_length = 0
+    # visits[i_thousand_episode][current_state-1] += 1
+    # encoded_current_state = one_hot_state(current_state)
 
-            Done = False
+    for i_episode in range(20000):
+        state = env.reset()
+        agent.first_goal_flag = 1
+        Done = False
+        episode_reward = 0
+        meta_timestep += 1
+        meta_epsilon = exploration_schedule.value(total_timestep)
+        goal = agent.select_goal(state, meta_epsilon)[0]  # one_hot:[0,1]
+        while True:
+            total_extrinsic_reward = 0.0
+            state_0 = state
             while True:
-                obs = env.reset()
-                obs0 = obs
-                meta_timestep += 1
-                # Get annealing exploration rate (epislon) from exploration_schedule
-                # meta_epsilon = exploration_schedule.value(total_timestep)
-                # goal = agent.select_goal(obs, meta_epsilon)[0] # one_hot:[0,1]
-                # print("goal: ", goal)
-                # goal = agent.one_hot_state(goal)
+                print("goal: ", goal)
+                total_timestep += 1
+                episode_length += 1
+                action_epsilon = exploration_schedule.value(total_timestep)
+                action = agent.select_action(policy, env, state, goal, action_epsilon)
+                env.goal = goal
+                ### Step the env and store the transition
+                next_state, extrinsic_reward, done, _ = env.step(action)
+                episode_reward += extrinsic_reward
+                intrinsic_reward = agent.get_intrinsic_reward(goal, next_state)
 
-                total_extrinsic_reward = 0.0
-                goal_reached = False
-                while True:
-                    meta_epsilon = exploration_schedule.value(total_timestep)
-                    goal = agent.select_goal(obs, meta_epsilon)[0]  # one_hot:[0,1]
-                    print("goal: ", goal)
-                    total_timestep += 1
-                    episode_length += 1
-                    # ctrl_timestep[goal] += 1
-                    # Get annealing exploration rate (epislon) from exploration_schedule
-                    # ctrl_epsilon = exploration_schedule.value(total_timestep)
-                    # joint_state_goal = np.concatenate([encoded_current_state, encoded_goal], axis=1)
+                agent.update_meta_controller(gamma)
+                state = next_state
 
-                    action = agent.select_action(policy, env, obs, goal)
-                    env.goal = goal
-                    ### Step the env and store the transition
-                    next_state, extrinsic_reward, done, _ = env.step(action)
-                    obs = next_state
-                    # Update statistics
-                    # stats.episode_rewards[i_thousand_episode*1000 + i_episode] += extrinsic_reward
-                    # stats.episode_lengths[i_thousand_episode*1000 + i_episode] = episode_length
-                    # visits[i_thousand_episode][next_state-1] += 1
+                total_extrinsic_reward += extrinsic_reward
+                if done:
+                    Done = True
+                    break
+                if goal == 0 and env.goal_0_reach == 1:
+                    if agent.first_goal_flag == 1:
+                        agent.first_goal_flag = 0
+                    break
+                if goal == 1 and env.goal_1_reach == 1:
+                    break
+                if episode_length%100 == 0:
+                    agent.save_model()
+            agent.meta_replay_memory.push(state_0, goal, next_state, total_extrinsic_reward, done)
+            env.writer.add_scalars("reward",
+                                   {"reward": total_extrinsic_reward}, total_timestep)
+            if Done:
+                break
+            meta_epsilon = exploration_schedule.value(total_timestep)
+            goal = agent.select_goal(state, meta_epsilon)[0]  # one_hot:[0,1]
+        # Goal Finished
+        env.writer.add_scalars("episode_reward",
+                                {"episode_reward": episode_reward}, meta_timestep)
+        print("---------------")
+        print("episode_reward:  ", episode_reward)
+        print("---------------")
+        print("push buff number:", )
 
-                    # encoded_next_state = one_hot_state(next_state)
-                    intrinsic_reward = agent.get_intrinsic_reward(goal, next_state)
-                    # goal_reached = next_state == goal
-                    #
-                    # joint_next_state_goal = np.concatenate([encoded_next_state, encoded_goal], axis=1)
-                    # agent.ctrl_replay_memory.push(joint_state_goal, action, joint_next_state_goal, intrinsic_reward, done)
-                    # # Update Both meta-controller and controller
-                    agent.update_meta_controller(gamma)
-
-                    # agent.obs_encoder
-                    # agent.update_controller(gamma)
-                    #
-                    total_extrinsic_reward += extrinsic_reward
-                    if done:
-                        break
-                    if episode_length%100 == 0:
-                        agent.save_model()
-                    # current_state = next_state
-                    # encoded_current_state = encoded_next_state
-                # Goal Finished
-                print("---------------")
-                print("extrinsic_reward:  ", total_extrinsic_reward)
-                print("---------------")
-                agent.meta_replay_memory.push(obs0, goal, obs, total_extrinsic_reward, done)
-                print("push buff number:", )
-
-        print("step : ", i_thousand_episode)
 
     return agent, stats
+
+def hdqn_eval(
+    env,
+    agent,
+    policy,
+    num_episodes,
+    exploration_schedule,
+    gamma=1.0,
+    ):
+    state = env.reset()
+    for i in range(2000):
+        goal = agent.select_goal(state, 1)[0]
+        while True:
+            while True:
+                print("goal: ", goal)
+                action = agent.select_action(policy, env, state, goal, 0)
+                env.goal = goal
+                ### Step the env and store the transition
+                next_state, extrinsic_reward, done, _ = env.step(action)
+                state = next_state
+
+                if done:
+                    Done = True
+                    break
+                if goal == 0 and env.goal_0_reach == 1:
+                    if agent.first_goal_flag == 1:
+                        agent.first_goal_flag = 0
+                    break
+                if goal == 1 and env.goal_1_reach == 1:
+                    break
+
+            if Done:
+                break
+            goal = agent.select_goal(state, 1)[0]  # one_hot:[0,1]

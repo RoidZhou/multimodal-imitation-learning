@@ -9,7 +9,7 @@ def rename_files(folder_path):
     files = [f for f in files if os.path.isfile(os.path.join(folder_path, f))]
 
     # 确保有50个文件
-    if len(files) != 50:
+    if len(files) != 100:
         print(f"文件夹内文件数量不是50个，当前有{len(files)}个文件")
         return
 
@@ -24,7 +24,7 @@ def rename_files(folder_path):
 
         # 新文件名
         new_name = start_num + i
-        new_name = f"{new_name:.0f}{'.0'}"
+        new_name = f"{new_name:.0f}{'.0.0.0'}"
 
         # 旧文件完整路径
         old_file = os.path.join(folder_path, filename)
@@ -37,5 +37,5 @@ def rename_files(folder_path):
 
 
 # 使用示例
-folder_path = "/home/zhou/autolab/imitation_learning_idp3/data/ur5_assembly/ur5_assembly_only_orien2.zarr/data/state"  # 替换为你的实际文件夹路径
+folder_path = "/home/zhou/autolab/imitation_learning_idp3/data/ur5_assembly/ur5_assembly_20_.zarr/data/image_hand"  # 替换为你的实际文件夹路径
 rename_files(folder_path)

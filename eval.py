@@ -33,7 +33,7 @@ def main(cfg: OmegaConf):
     env = hydra.utils.instantiate(cfg.task.env, cfg.task.shape_meta)
     device = 'cuda:0'
     device = torch.device(device)
-    policy.load_state_dict(torch.load("model_380.pth", map_location=device, pickle_module=dill))
+    policy.load_state_dict(torch.load("model_400.pth", map_location=device, pickle_module=dill))
     policy.to(device)
     policy.eval()
 

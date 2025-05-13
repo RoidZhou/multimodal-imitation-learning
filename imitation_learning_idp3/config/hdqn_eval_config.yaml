@@ -3,7 +3,7 @@ obs_as_global_cond: True
 n_action_steps: 3
 n_obs_steps: 2
 model_path:
-  path: "/home/zhou/autolab/imitation_learning_idp3/model_600_latest.pth"
+  path: "/home/zhou/autolab/imitation_learning_idp3/model_600.pth"
 shape_meta:
   # acceptable types: rgb, low_dim
   obs:
@@ -19,14 +19,14 @@ shape_meta:
   action:
     shape: [ 7 ]
   feature:
-    shape: [ 3 ]
+    shape: [ 2 ]
 # hDQN 代理的配置
 agent:
   _target_: diffusion_policy_3d.policy.hdqn_mdp.hDQN  # 指定要实例化的类
   num_goal: 6                      # 目标数量
-  num_action: 3                    # 动作数量
+  num_action: 2                    # 动作数量
   replay_memory_size: 10000        # 回放记忆大小
-  batch_size: 64                  # 批量大小
+  batch_size: 8                  # 批量大小
 
   obs_encoder:                     # 观测编码器配置
     _target_: diffusion_policy_3d.model.vision.multimodal_obs_encoder.MultiModalObsEncoder
@@ -101,4 +101,4 @@ policy:
   cond_predict_scale: True
 
 env:
-  _target_: imitation_learning_idp3.env.hdqn_env.mdp.UR5Env
+  _target_: imitation_learning_idp3.env.hdqn_env.mdp_eval_env.UR5Env

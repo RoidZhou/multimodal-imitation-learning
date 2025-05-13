@@ -5,7 +5,7 @@ import sys
 sys.path.append('./imitation_learning_idp3')
 from imitation_learning_idp3.env.hdqn_env.mdp import UR5Env
 from diffusion_policy_3d.policy.hdqn_mdp import OptimizerSpec
-from hdqn import hdqn_learning
+from hdqn import hdqn_eval
 from utils.plotting import plot_episode_stats
 from utils.schedule import LinearSchedule
 import pathlib
@@ -58,7 +58,8 @@ def main(cfg: OmegaConf):
 
     env.reset()
 
-    agent, stats, visits = hdqn_learning(
+
+    agent, stats, visits = hdqn_eval(
         env=env,
         agent=agent,
         policy = policy,

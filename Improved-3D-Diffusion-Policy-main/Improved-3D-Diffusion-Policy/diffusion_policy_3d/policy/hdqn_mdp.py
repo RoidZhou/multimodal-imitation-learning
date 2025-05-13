@@ -106,7 +106,7 @@ class hDQN():
         self.device = torch.device(device)
         self.obs_encoder = obs_encoder.to(self.device)
         self.target_obs_encoder = obs_encoder.to(self.device)
-        fc = nn.Linear(1027, 2)  # 定义全连接层
+        fc = nn.Linear(1027, 3)  # 定义全连接层
         self.fc = fc.to(self.device)
         self.meta_controller = MetaController().type(dtype)
         self.target_meta_controller = MetaController().type(dtype)
@@ -124,6 +124,7 @@ class hDQN():
         self.horizon = 3
         self.n_obs_steps = 2
         self.first_frame_observation = 1
+        self.first_goal_flag = 1
 
 
     def get_intrinsic_reward(self, goal, state):
@@ -131,42 +132,47 @@ class hDQN():
 
     def select_goal(self, obs, epilson):
         sample = random.random()
-        if sample > epilson:
-            # state = torch.from_numpy(state).type(dtype)
-            images = np.zeros((1, self.horizon, *np.transpose(obs['image'], (2, 0, 1)).shape))
-            images_hand = np.zeros((1, self.horizon, *np.transpose(obs['image_hand'], (2, 0, 1)).shape))
-            depths = np.zeros((1, self.horizon, *np.transpose(obs['depth'], (2, 0, 1)).shape))
-            agent_pos = np.zeros((1, self.horizon, *obs['agent_pos'].shape))
-            force = np.zeros((1, self.horizon, *obs['force'].shape))
-            for i in range(self.horizon):
-                images[0, i, ...] = np.transpose(obs['image'], (2, 0, 1))
-                images_hand[0, i, ...] = np.transpose(obs['image_hand'], (2, 0, 1))
-                depths[0, i, ...] = np.transpose(obs['depth'], (2, 0, 1))
-                agent_pos[0, i, ...] = obs['agent_pos']
-                force[0, i, ...] = obs['force']
-            observation = {}
-            observation['images'] = images
-            observation['images_hand'] = images_hand
-            observation['depths'] = depths
-            observation['agent_pos'] = agent_pos
-            observation['force'] = force
-
-            # 转换为编码器需要的格式
-            encoder_input = self.prepare_eval_observation(observation)
-            encoder_batch = dict_apply(encoder_input, lambda x: x.to(self.device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
-            with torch.no_grad():  # 确保不计算梯度（推理模式）
-                nobs_features = self.obs_encoder(encoder_batch)
-                nobs_features = self.fc(nobs_features).data.max(1)[1]
-                return nobs_features.cpu()  # 直接使用 tensor
+        if self.first_goal_flag == 1:
+            return torch.IntTensor([0])
         else:
-            return torch.IntTensor([random.randrange(self.num_action)])
+            if sample > epilson:
+                # state = torch.from_numpy(state).type(dtype)
+                images = np.zeros((1, self.horizon, *np.transpose(obs['image'], (2, 0, 1)).shape))
+                images_hand = np.zeros((1, self.horizon, *np.transpose(obs['image_hand'], (2, 0, 1)).shape))
+                depths = np.zeros((1, self.horizon, *np.transpose(obs['depth'], (2, 0, 1)).shape))
+                agent_pos = np.zeros((1, self.horizon, *obs['agent_pos'].shape))
+                force = np.zeros((1, self.horizon, *obs['force'].shape))
+                for i in range(self.horizon):
+                    images[0, i, ...] = np.transpose(obs['image'], (2, 0, 1))
+                    images_hand[0, i, ...] = np.transpose(obs['image_hand'], (2, 0, 1))
+                    depths[0, i, ...] = np.transpose(obs['depth'], (2, 0, 1))
+                    agent_pos[0, i, ...] = obs['agent_pos']
+                    force[0, i, ...] = obs['force']
+                observation = {}
+                observation['images'] = images
+                observation['images_hand'] = images_hand
+                observation['depths'] = depths
+                observation['agent_pos'] = agent_pos
+                observation['force'] = force
 
-    def select_action(self, policy, env, obs, goal):
+                # 转换为编码器需要的格式
+                encoder_input = self.prepare_eval_observation(observation)
+                encoder_batch = dict_apply(encoder_input, lambda x: x.to(self.device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
+                with torch.no_grad():  # 确保不计算梯度（推理模式）
+                    nobs_features = self.obs_encoder(encoder_batch)
+                    nobs_features = self.fc(nobs_features).data.max(1)[1]
+                    return nobs_features.cpu()  # 直接使用 tensor
+            else:
+                return torch.IntTensor([random.randrange(self.num_action)])
+
+    def select_action(self, policy, env, obs, goal, action_epsilon):
         sample = random.random()
 
         # 获取值为 1 的索引（即预测类别）
         # class_indices = torch.argmax(goal, dim=-1)  # shape: (B,)
         class_indices = goal.item()  # shape: (B,)
+        # if sample < action_epsilon:
+        #     class_indices = 1-class_indices
         if class_indices == 0:
             # self.prepare_select_action_observation()
 

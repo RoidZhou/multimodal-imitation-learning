@@ -1,6 +1,5 @@
 from gym import spaces
 import random
-
 class StochasticMDPEnv:
 
     def __init__(self):
@@ -44,7 +43,6 @@ import gym
 from gym import error, spaces, utils
 import pybullet as p
 import pybullet_data
-import open3d as o3d
 import random
 import math
 from collections import namedtuple
@@ -65,7 +63,7 @@ import cv2
 import sys
 from spatialmath import SE3
 import spatialmath as sm
-
+from numpy.ma.core import argmin
 def fix_center_rotation(end_pos, end_orn, relative_offset, relative_euler, dy_M=0.055):
     """
        目的：固定点旋转
@@ -254,13 +252,16 @@ class UR5Env:
         self.control_hz = 100
         self.prev_heght = 0
         self.prev_angle_err = 30
-        self.goal_reach = 0
+        self.goal_0_reach = 0
+        self.goal_1_reach = 0
         self.goal = 0
+        self.arrive_orien_num = 0
 
         self.Visualize_rotation_center_UI = DebugAxes()  # 可视化旋转中心
         self.goalPosition1 = DebugAxes()  # 可视化 eelink 坐标
         self.goalPosition_eelink = DebugAxes()  # 可视化 eelink 坐标
         self.goalPosition_hole = DebugAxes()  # 可视化 eelink 坐标
+        self.writer = SummaryWriter('./HDQN_peg/logs')
 
         self.image_width = 320
         self.image_height = 240
@@ -285,7 +286,7 @@ class UR5Env:
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,接触桌面
         init_end_orien = np.random.uniform(-0.5, 0.5)
         self.init_joint_val =[0.21195291679571792, -1.2151152721500111, -2.102115573329094, # 0.10195291679571792
-                              -1.4251581329978485, 1.5707963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
+                              -1.4221581329978485, 1.5657963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
         # 插孔是否失败阈值
         self.ftmax = [200, 100]
         self.threshold = [150, 100]
@@ -325,7 +326,7 @@ class UR5Env:
         ##  第一步，连接仿真环境
         self.is_render = render
         if self.is_render:
-            self.physicsClient_use = p.connect(p.GUI)
+            self.physicsClient_use = p.connect(p.DIRECT)
             self.physicsClient_plan = p.connect(p.DIRECT)
         else:
             p.connect(p.DIRECT)
@@ -445,9 +446,12 @@ class UR5Env:
         p.setGravity(0, 0, 0)
 
     def reset(self):
+        self.goal_0_reach = 0
+        self.goal_1_reach = 0
         self.goal_cont=0
         self.randm_num += 1
         self.int_falg = True
+        self.arrive_orien_num = 0
         self.mointor_force_torque = np.zeros((2, 60))
         p.enableJointForceTorqueSensor(self.ur5_id, 7)
         p.stepSimulation()
@@ -530,6 +534,8 @@ class UR5Env:
         robot_current_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
         self.robot_current_orientation = np.array(robot_current_state[1])
         self.robot_current_position = np.array(robot_current_state[0])
+        self.robot_reset_position = self.robot_current_position
+        self.robot_reset_orientation = self.robot_current_orientation
 
         # 计算当前深度
         po = p.getLinkState(self.ur5_id, 7)
@@ -617,24 +623,66 @@ class UR5Env:
         reward = 0
 
         pose_err = self.robot_current_position - self.robot_prev_position
-
+        insert_depth = self.robot_reset_position[2] - self.robot_current_position[2]
         orientation_err = np.dot(self.robot_prev_orientation, self.robot_current_orientation)
         orien_angle_err = 2*np.arccos(orientation_err)
         angle_err = orien_angle_err * 180 / np.pi
+
+        angles = []
+        angles_select = [-150, -30, 90, 210]
+        for i in range(4):
+            hole_orientation = Rotation.from_euler('xyz', [90, 90, -150+120*i], degrees=True).as_quat()  # 默认固定孔的姿态
+
+            robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            state_orientation = robot_state_position[1]
+            orientation_err = np.dot(hole_orientation, state_orientation)
+            orien_angle_err = 2*np.arccos(orientation_err)
+            angle_err = orien_angle_err*180/np.pi
+            angles.append(angle_err)
+
+        # if insert_depth > 0.007:
+        #     done = True
+        #     reward = 10
+        #     return observation, reward, done, info
+
         if self.goal == 0:
-            if angle_err < 1 and self.goal_reach == 0:
-                self.goal_reach = 1
-                reward = 10
-            if np.linalg.norm(current_force)>1000:
-                reward = -10
+            if min(angles) < 2 and self.goal_0_reach == 0:
+                self.goal_0_reach = 1
+                reward = 1
+            if insert_depth > 0.004 and self.goal_0_reach == 0:
+                self.goal_0_reach = 1
+                reward = 1
         if self.goal == 1:
-            if current_force[2] < 20:
+            # if self.goal_0_reach == 0:
+            #     done = True
+            #     reward = 0
+            if insert_depth > 0.004 and self.goal_1_reach == 0:
+                # done = True
                 reward = 2
-            else:
+                self.goal_1_reach = 1
+            # if insert_depth > 0.007:
+            #     done = True
+            #     reward = 3
+            if abs(current_force[2]) < 10 and self.goal_1_reach == 0 and self.goal_0_reach == 1:
+                reward = 0
+            elif abs(current_force[2]) < 100 and self.goal_1_reach == 0 and self.goal_0_reach == 1:
+                reward = -0
+            elif abs(current_force[2]) > 100 and self.goal_0_reach == 0:
+                reward = -0
                 done = True
+            elif abs(current_force[2]) > 100 and self.goal_0_reach == 1 and self.goal_1_reach == 0:
+                reward = -0
+
         if self.goal == 2:
-            if pose_err < 0:
-                reward = 2
+            if self.goal_0_reach == 0 or self.goal_1_reach == 0:
+                done = True
+                reward = 0
+            if insert_depth > 0.007:
+                done = True
+                reward = 3
+        if self.step_counter > 100:
+            done = True
+            print("step counter arrive")
 
         # ----  以下全部注释  -----
         # orientation_err = np.dot(self.hole_terminal_orientation, self.robot_current_orientation)
@@ -643,7 +691,7 @@ class UR5Env:
         # target_angle = self.find_nearest_target(angle_err)
         # if self.is_angle_close(angle_err,tolerance=1):
         #     done = True
-        #     self.goal_reach = 1
+        #     self.goal_0_reach = 1
         #     reward = 10
         #
         #     if current_force[2] < 100:
@@ -931,9 +979,9 @@ class UR5Env:
         assert (rgb_image_3_channel.shape == (self.image_height, self.image_width, 3) or rgb_image_hand_3_channel.shape == (self.image_height, self.image_width, 3))
 
         """ save images """
-        cv2.imwrite("./rgb_image_3_channel.jpg", rgb_image_3_channel)
-        cv2.imwrite("./rgb_image_hand_3_channel.jpg", rgb_image_hand_3_channel)
-        cv2.imwrite("./depth_image_uint8.jpg", depth_image_uint8)
+        # cv2.imwrite("./rgb_image_3_channel.jpg", rgb_image_3_channel)
+        # cv2.imwrite("./rgb_image_hand_3_channel.jpg", rgb_image_hand_3_channel)
+        # cv2.imwrite("./depth_image_uint8.jpg", depth_image_uint8)
 
         """ the observation can be changed to perform ablative studies"""
 

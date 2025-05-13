@@ -18,7 +18,8 @@ shape_meta:
 dataset:
   _target_: imitation_learning_idp3.dataset.ur5_grasp_dataset_2d.UR5GraspDataset2D
 #  zarr_path: ./data/ur5_grasp/ur5_grasp.zarr
-  zarr_path: ./data/ur5_assembly/ur5_assembly_only_orien.zarr
+#  zarr_path: ./data/ur5_assembly/ur5_assembly_only_orien.zarr
+  zarr_path: ./data/ur5_assembly/ur5_assembly_20.zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
