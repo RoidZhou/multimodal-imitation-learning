@@ -45,7 +45,7 @@ policy:
     prediction_type: epsilon # or sample
 
   obs_encoder:
-    _target_: diffusion_policy_3d.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
+    _target_: diffusion_policy_3d.model.vision.multimodal_obs_encoder.MultiModalObsEncoder
     shape_meta: ${shape_meta}
     rgb_model:
       _target_: diffusion_policy_3d.model.vision.model_getter.get_resnet

@@ -31,7 +31,7 @@ optimizer_spec = OptimizerSpec(
     kwargs=dict(lr=LEARNING_RATE, alpha=ALPHA, eps=EPS),
 )
 
-exploration_schedule = LinearSchedule(50000, 0.1, 1)
+exploration_schedule = LinearSchedule(2000, 0.1, 1)
 
 sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode='w', buffering=1)

@@ -87,7 +87,8 @@ def channels_first_collate_fn(batch):
             'agent_pos': torch.stack([item['obs']['agent_pos'] for item in batch]),
             'images': torch.stack([item['obs']['images'] for item in batch]).permute(0, 1, 4, 2, 3),
             'images_hand': torch.stack([item['obs']['images_hand'] for item in batch]).permute(0, 1, 4, 2, 3),
-            'depths': torch.stack([item['obs']['depths'] for item in batch]).permute(0, 1, 4, 2, 3)
+            'depths': torch.stack([item['obs']['depths'] for item in batch]).permute(0, 1, 4, 2, 3),
+            'force': torch.stack([item['obs']['forces'] for item in batch])
         },
         'action': torch.stack([item['action'] for item in batch])
     }

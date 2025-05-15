@@ -85,6 +85,7 @@ class hDQN():
     def __init__(self,
                  optimizer_spec,
                  obs_encoder: MultiModalObsEncoder,
+                 pretrained_mode_path,
                  num_goal=6,
                  num_action=2,
                  replay_memory_size=10000,
@@ -105,7 +106,12 @@ class hDQN():
         device = 'cuda:0'
         self.device = torch.device(device)
         self.obs_encoder = obs_encoder.to(self.device)
+        model_dict = torch.load(pretrained_mode_path)
+        features_dict = {k.replace('obs_encoder.', ''): v for k, v in model_dict.items()
+                         if k.startswith('obs_encoder.')}
+        self.obs_encoder.load_state_dict(features_dict)
         self.target_obs_encoder = obs_encoder.to(self.device)
+        self.target_obs_encoder.load_state_dict(features_dict)
         fc = nn.Linear(1027, 3)  # 定义全连接层
         self.fc = fc.to(self.device)
         self.meta_controller = MetaController().type(dtype)

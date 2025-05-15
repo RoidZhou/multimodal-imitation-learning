@@ -335,6 +335,7 @@ class UR5Env:
                                      cameraYaw=0,
                                      cameraPitch=-40,
                                      cameraTargetPosition=[0.55, -0.35, 0.2])
+        p.setTimeStep(1/240)
 
         # -----------------------------------------------------------------------添加模型-----------------------------------------------------------------------------------------------
         # 添加pybullet的额外数据地址，使程序可以直接调用到内部的一些模型
@@ -828,11 +829,11 @@ class UR5Env:
                                     targetVelocity=0.0,
                                     force=forcemaxforce,
                                     maxVelocity=1,
-                                    positionGain=0.03,
+                                    positionGain=0.1,
                                     velocityGain=1,
                                     physicsClientId = physicsClientId)
             j = j+1
-        self.wait_n_steps(120, physicsClientId)
+        self.wait_n_steps(240, physicsClientId)
 
     def getForceTorque(self):
         """

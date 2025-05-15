@@ -124,20 +124,7 @@ class MultiModalObsEncoder(ModuleAttrMixin):
         self.rgb_keys = rgb_keys
         self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
-        self.out_dim = shape_meta['feature'].shape
         self.force_dim = shape_meta['obs']['force'].shape
-        # self.encoder_output_dim = 1024+self.force_dim[0]
-        # 全连接层，将最终特征映射到 out_dim
-        # 先计算 encoder 的输出维度
-        # with torch.no_grad():
-        #     example_obs_dict = dict()
-        #     for key, attr in obs_shape_meta.items():
-        #         shape = tuple(attr["shape"])
-        #         this_obs = torch.zeros((1,) + shape, dtype=self.dtype, device=self.device)
-        #         example_obs_dict[key] = this_obs
-        #     example_output = self.forward(example_obs_dict)
-        #     encoder_output_dim = example_output.shape[1]
-        # self.fc = nn.Linear(self.encoder_output_dim, self.out_dim[0])  # 定义全连接层
 
     def forward(self, obs_dict):
         batch_size = None
@@ -190,17 +177,6 @@ class MultiModalObsEncoder(ModuleAttrMixin):
             features.append(data)
         
         # concatenate all features
-        # 修改特征拼接和全连接部分
-        # result = torch.cat([f.clone() if torch.is_tensor(f) else torch.tensor(f)
-        #                     for f in features], dim=-1)
-
-        # 确保全连接层输入设备一致
-        # result = result.to(next(self.fc.parameters()).device)
-
-        # result = self.fc(result)
-        # 转换为 one_hot 形式
-        # result = F.one_hot(torch.argmax(result, dim=-1), num_classes=self.out_dim[0]).float()
-
         result = torch.cat(features, dim=-1)
         return result
 

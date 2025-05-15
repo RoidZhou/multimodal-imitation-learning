@@ -23,6 +23,7 @@ shape_meta:
 # hDQN 代理的配置
 agent:
   _target_: diffusion_policy_3d.policy.hdqn_mdp.hDQN  # 指定要实例化的类
+  pretrained_mode_path: "/home/zhou/autolab/imitation_learning_idp3/model_420.pth"
   num_goal: 6                      # 目标数量
   num_action: 3                    # 动作数量
   replay_memory_size: 10000        # 回放记忆大小
