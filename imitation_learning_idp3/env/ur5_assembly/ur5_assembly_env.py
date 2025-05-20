@@ -201,7 +201,7 @@ class UR5Env:
         self.force_dim = 3
 
         self.randm_num = 1
-        self.writer = SummaryWriter('./paperforceslog2')
+        self.writer = SummaryWriter('./HDQN_peg/collect_dataset_log')
         self.mointor_force_torque = np.zeros((2, 60))
         self.neibu = False
         self.sucessful_number = 0 # 迭代成功的次数
@@ -231,7 +231,7 @@ class UR5Env:
         self.image_height = 240
 
         # 机械臂实际执行频率，ur5真实通讯频率是120hz
-        self._timeStep = 100
+        self._timeStep = 120
         self.t = (1 / self._timeStep)*2
         self.T0 = sm.SE3()
 
@@ -290,7 +290,7 @@ class UR5Env:
         ##  第一步，连接仿真环境
         self.is_render = render
         if self.is_render:
-            self.physicsClient_use = p.connect(p.DIRECT)
+            self.physicsClient_use = p.connect(p.GUI)
             self.physicsClient_plan = p.connect(p.DIRECT)
         else:
             p.connect(p.DIRECT)
@@ -307,7 +307,7 @@ class UR5Env:
         self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
-                         lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
+                         lateralFriction=2, spinningFriction=2, rollingFriction=0, frictionAnchor=True)
 
         #  直的
         p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32],
@@ -378,10 +378,10 @@ class UR5Env:
         when k=80, d=56, m=10 => w=2.82 l=1 : need 17 steps
         """
         self.In_M = 0.1 # M = 10， inverse_M = 1/M 
-        self.translational_stiffness = 80
+        self.translational_stiffness = 10
         self.rotational_stiffness = 10
         self.translational_damping = 40
-        self.translational_damping = 10
+        self.translational_damping = 50
 
         self.Inverse_M = np.mat(self.In_M * np.eye(6))
 
@@ -407,9 +407,23 @@ class UR5Env:
         # 设置Z方向的重力
         p.setGravity(0, 0, 0)
 
+    def reset_controller(self):
+        self.arm_desired_twist_ = np.mat(np.zeros((6, 1)))
+        self.arm_desired_position_ = np.mat(np.zeros((3, 1)))
+        self.desire_control_error_integral_ = np.mat(np.zeros((6, 1)))
+        self.period = 0.5
+        self.arm_max_vel = 0.001
+        self.arm_max_acc = 0.001
+        # selection matrix
+        self.force_matrix_ = np.diag(np.array([0, 0, 1, 0, 0, 0]))
+        self.position_matrix_ = np.diag(np.array([1, 1, 0, 0, 0, 0]))
+        self.force_matrix = np.mat(self.force_matrix_)
+        self.position_matrix = np.mat(self.position_matrix_)
+
     def reset(self):
         self.goal_cont=0
         self.randm_num += 1
+        self.solve_steps = 0
         self.int_falg = True
         self.mointor_force_torque = np.zeros((2, 60))
         p.enableJointForceTorqueSensor(self.ur5_id, 7)
@@ -563,6 +577,8 @@ class UR5Env:
         every_epoch_num = time_step_num // every_step_num
         times = np.linspace(0, total_time, time_step_num)
         desired_poses = np.zeros((time_step_num, self.numdof))
+        desired_cart_t = np.zeros((time_step_num, 3))
+        desired_cart_r = np.zeros((time_step_num, 4))
 
         states = np.zeros((every_epoch_num, self.action_dim))
         actions = np.zeros((every_epoch_num, self.action_dim))
@@ -601,6 +617,8 @@ class UR5Env:
                     break
 
             desired_poses[i, :] = joint_position
+            desired_cart_t[i, :] = target_t
+            desired_cart_r[i, :] = target_r_xyzw
             """ test desired_pose """
             # self.control_jointsArray_to_target(self.ur5_id, list(desired_poses[i, :]),
             #                                    joint_indices, physicsClientId=self.physicsClient_use)
@@ -667,9 +685,9 @@ class UR5Env:
             if time_num >= time_step_num - every_step_num:
                 break
 
-            self.control_joints_to_target(self.ur5_id, desired_poses[time_num, :], self.control_joint_ids,
-                                          physicsClientId=self.physicsClient_use)
-
+            # self.control_joints_to_target(self.ur5_id, desired_poses[time_num, :], self.control_joint_ids,
+            #                               physicsClientId=self.physicsClient_use)
+            self.apply_hybrid_controller(np.concatenate((desired_cart_t[time_num, :], desired_cart_r[time_num, :]), axis=0), physicsClientId=self.physicsClient_use)
             time_until_next_step = 1/self._timeStep - (time.time() - step_start)
             if time_until_next_step > 0:
                 time.sleep(time_until_next_step)
@@ -1057,3 +1075,350 @@ class UR5Env:
             self.Visualize_rotation_center_UI.update(peg_link_pos, peg_link_Quaternion)
 
         return [peg_link_pos, peg_link_Quaternion]
+
+    def impedance_controller(self, action, physicsClientId):
+        """
+        z方向使用力控制
+        x,y方向使用导纳控制
+        input:
+        out:
+            z方向恒力控制
+            x,y方向柔顺
+        """
+        action_to_target_pose = [None] * 3
+        action_to_target_orie = [None] * 4
+        action_to_current = [None] * 3
+        desired_force_z = 0.1  # N
+        desired_force_xy = 0.0  # N
+        desired_force_rz = 0.0
+        Kp_force = 5  # 比例增益
+        Ki_force = 0.4  # 积分增益
+        Kd_force = 0.01  # 微分增益
+        integral_force_error_z = 0.0
+        previous_force_error_z = 0.0
+        delta_z_max = 2
+        # 获取当前的关节力和力矩
+        FT = self.getForceTorque()
+        Fext = [FT[0], FT[1], FT[2]]
+        Text = [FT[3], FT[4], FT[5]]
+        # Text = [0, 0, 0]
+
+        action_to_target_pose[0] = action[0] + self.zero_Position[0]
+        action_to_target_pose[1] = action[1] + self.zero_Position[1]
+        action_to_target_pose[2] = action[2] + self.zero_Position[2]
+
+        action_to_target_orie[0] = action[3]
+        action_to_target_orie[1] = action[4]
+        action_to_target_orie[2] = action[5]
+        action_to_target_orie[3] = action[6]
+
+        wrench_z = Fext[2]
+        print("wrench_z : ", wrench_z)
+
+        self.force_error_z = wrench_z - desired_force_z
+        self.force_y = Fext[1]
+
+        integral_force_error_z += self.force_error_z * self.duration
+
+        # 计算微分项
+        derivative_force_error_z = (self.force_error_z - previous_force_error_z) / self.duration
+        previous_force_error_z = self.force_error_z
+
+        # 计算力控制输出
+        force_control_output_z = Kp_force * self.force_error_z + \
+                                 Ki_force * integral_force_error_z + \
+                                 0
+        #  Kd_force * derivative_force_error_z
+        force_z_adjustment = force_control_output_z
+        pos_z_adjustment = max(min(force_z_adjustment, delta_z_max), -delta_z_max)
+        pos_z_adjustment = pos_z_adjustment / 100  # 手动补偿
+        if wrench_z > 0.1:
+            print("wrench_z : ", wrench_z)
+            pos_z_adjustment = pos_z_adjustment
+        for i in range(1):
+            if Fext[1] > 0.5 or Text[2] > 0.001 :
+                desired_force_rz = -0.1
+                desired_force_xy = 0.1
+            force_external = np.mat([[Fext[0] - desired_force_xy], [Fext[1] - desired_force_xy], [0.0], [0.0], [0.0], [Text[2] - desired_force_rz]])
+            # force_external = np.mat([[0], [Fext[1]], [0], [0], [0], [0]])
+
+            # 获取当前的关节状态
+            self.current_Position = p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[4]
+            self.current_Orientation = np.array(p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[5])
+            action_to_current[0] = self.current_Position[0] - action_to_target_pose[0]  # 计算当前位置与目标位置的差值
+            action_to_current[1] = self.current_Position[1] - action_to_target_pose[1]
+            action_to_current[2] = self.current_Position[2] - action_to_target_pose[2]
+
+            self.orientation_err = np.dot(self.current_Orientation, self.zero_Orientation)
+            orien_angle_err = 2 * np.arccos(self.orientation_err)
+            self.angle_err = orien_angle_err * 180 / np.pi
+            res = self.quaternion_to_euler(self.zero_Orientation, self.current_Orientation)
+            print("res: ", res)
+
+            current_orie_matrix = Rotation.from_quat(self.current_Orientation).as_matrix()
+            action_to_target_orie_matrix = Rotation.from_quat(self.zero_Orientation).as_matrix()
+            target_orie_inv = action_to_target_orie_matrix.T
+            quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
+
+            quat_rot_err_tmp = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
+            quat_rot_err_tmp = quat_rot_err_tmp * 100
+            # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
+            print("quat_rot_err_tmp: ", quat_rot_err_tmp)
+
+            # Position error
+            self.dx = action_to_current[0] / 1.0
+            self.dy = action_to_current[1] / 1.0
+            self.dz = action_to_current[2] / 1.0
+            self.rx = quat_rot_err_tmp[0]
+            self.ry = quat_rot_err_tmp[1]
+            self.rz = quat_rot_err_tmp[2]
+            if self.rz < 1e-5:
+                dx = 0
+            # self.pose_err = np.mat([[0.0], [-self.dy], [0.0], [0.0], [0.0], [0.0]])
+            self.pose_err = np.mat([[-self.dx], [-self.dy], [0.0], [0.0], [0.0], [-self.rz]])
+            self.FT_err = np.mat([[0.0], [0.0], [pos_z_adjustment], [0.0], [0.0], [0.0]])
+
+            coupling_wrench_arm = self.Inverse_M * force_external + self.stiffness * self.pose_err
+            arm_desired_accelaration = -self.damping * self.arm_desired_twist_ + coupling_wrench_arm + self.FT_err
+
+            arm_acc_norm = np.linalg.norm(arm_desired_accelaration[:, :3])
+            if (arm_acc_norm > self.arm_max_acc_):
+                # print("Admittance generates high arm accelaration!", arm_acc_norm)
+                arm_desired_accelaration[:, :3] *= (self.arm_max_acc_ / arm_acc_norm)
+            print("pose_err : ", self.pose_err, self.FT_err)
+
+            # 更新 arm_desired_twist_adm_
+            deta_arm_desired_twist = arm_desired_accelaration * self.duration
+            self.arm_desired_twist_ += deta_arm_desired_twist
+
+        return self.arm_desired_twist_, deta_arm_desired_twist
+
+    # def impedance_controller(self, action):
+    #     """
+    #     z方向使用力控制
+    #     x,y方向使用导纳控制
+    #     input:
+    #     out:
+    #         z方向恒力控制
+    #         x,y方向柔顺
+    #     """
+    #     action_to_target_pose = [None] * 3
+    #     action_to_target_orie = [None] * 4
+    #     action_to_current = [None] * 3
+    #     desired_force_z = 1  # N
+    #     desired_force_xy = 0.0  # N
+    #     desired_torque_x = 0.0
+    #     desired_torque_y = 0.0
+    #     desired_torque_z = 0.0
+    #
+    #     Kp_force = 5  # 比例增益
+    #     Ki_force = 0.4  # 积分增益
+    #     Kd_force = 0.01  # 微分增益
+    #     integral_force_error_z = 0.0
+    #     previous_force_error_z = 0.0
+    #     delta_z_max = 1
+    #     # 获取当前的关节力和力矩
+    #     FT = self.getForceTorque()
+    #     Fext = [FT[0], FT[1], FT[2]]
+    #     Text = [FT[3], FT[4], FT[5]]
+    #     # Text = [0, 0, 0]
+    #
+    #     action_to_target_pose[0] = action[0] + self.zero_Position[0]
+    #     action_to_target_pose[1] = action[1] + self.zero_Position[1]
+    #     action_to_target_pose[2] = action[2] + self.zero_Position[2]
+    #
+    #     action_to_target_orie[0] = action[3]
+    #     action_to_target_orie[1] = action[4]
+    #     action_to_target_orie[2] = action[5]
+    #     action_to_target_orie[3] = action[6]
+    #
+    #     wrench_z = Fext[2]
+    #     print("wrench_z : ", wrench_z)
+    #
+    #     self.force_error_z = wrench_z - desired_force_z
+    #     self.force_y = Fext[1]
+    #
+    #     integral_force_error_z += self.force_error_z * self.duration
+    #
+    #     # 计算微分项
+    #     derivative_force_error_z = (self.force_error_z - previous_force_error_z) / self.duration
+    #     previous_force_error_z = self.force_error_z
+    #
+    #     # 计算力控制输出
+    #     force_control_output_z = Kp_force * self.force_error_z + \
+    #                              Ki_force * integral_force_error_z + \
+    #                              0
+    #     #  Kd_force * derivative_force_error_z
+    #     force_z_adjustment = force_control_output_z
+    #     pos_z_adjustment = max(min(force_z_adjustment, delta_z_max), -delta_z_max)
+    #     pos_z_adjustment = pos_z_adjustment / 100  # 手动补偿
+    #     if wrench_z > 0.1:
+    #         print("wrench_z : ", wrench_z)
+    #         pos_z_adjustment = pos_z_adjustment
+    #     for i in range(1):
+    #         if Fext[1] > 0.5:
+    #             desired_force_xy = 0.5
+    #         if Text[0] > 0.5:
+    #             desired_torque_x = 0.005
+    #         if Text[1] > 0.5:
+    #             desired_torque_y = 0.005
+    #         if Text[2] > 0.5:
+    #             desired_torque_z = 0.005
+    #         if np.abs(Fext[0]) > 1 or np.abs(Fext[1]) > 1 or np.abs(Fext[2]) > 1 or np.abs(Text[0]) > 1 or np.abs(Text[1]) > 1 or np.abs(Text[2]) > 1:
+    #         # if 0:
+    #             force_external = np.mat([[Fext[0]  - desired_force_xy], [Fext[1]  - desired_force_xy], [0], [0], [0], [0]])
+    #         else:
+    #             # force_external = np.mat([[Fext[0]  - desired_force_xy], [Fext[1] - desired_force_xy], [0], [Text[0] - desired_torque_x], [Text[1] - desired_torque_y], [Text[2] - desired_torque_z]])
+    #             force_external = np.mat([[Fext[0]  - desired_force_xy], [Fext[1] - desired_force_xy], [0.0], [0.0], [0.0], [Text[2]]])
+    #
+    #         # 获取当前的关节状态
+    #         self.current_Position = p.getLinkState(self.ur5_id, 7)[4]
+    #         self.current_Orientation = np.array(p.getLinkState(self.ur5_id, 7)[5])
+    #         action_to_current[0] = self.current_Position[0] - action_to_target_pose[0]  # 计算当前位置与目标位置的差值
+    #         action_to_current[1] = self.current_Position[1] - action_to_target_pose[1]
+    #         action_to_current[2] = self.current_Position[2] - action_to_target_pose[2]
+    #
+    #         orientation_err = np.dot(self.current_Orientation, self.zero_Orientation)
+    #         orien_angle_err = 2 * np.arccos(orientation_err)
+    #         angle_err = orien_angle_err * 180 / np.pi
+    #         res = self.quaternion_to_euler(self.zero_Orientation, self.current_Orientation)
+    #         print("res: ", res)
+    #
+    #         current_orie_matrix = Rotation.from_quat(self.current_Orientation).as_matrix()
+    #         action_to_target_orie_matrix = Rotation.from_quat(self.zero_Orientation).as_matrix()
+    #         target_orie_inv = action_to_target_orie_matrix.T
+    #         quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
+    #
+    #         quat_rot_err_tmp = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
+    #         # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
+    #         print("quat_rot_err_tmp: ", quat_rot_err_tmp)
+    #
+    #         # Position error
+    #         self.dx = action_to_current[0] / 1.0
+    #         self.dy = action_to_current[1] / 1.0
+    #         self.dz = action_to_current[2] / 1.0
+    #         self.rx = quat_rot_err_tmp[0]
+    #         self.ry = quat_rot_err_tmp[1]
+    #         self.rz = quat_rot_err_tmp[2]
+    #         # if dx < 1e-4:
+    #         #     dx = 0
+    #         if np.abs(Fext[0]) > 1 or np.abs(Fext[1]) > 1 or np.abs(Fext[2]) > 1 or np.abs(Text[0]) > 1 or np.abs(Text[1]) > 1 or np.abs(Text[2]) > 1:
+    #         # if 0:
+    #             self.pose_err = np.mat([[-self.dx], [-self.dy], [0.0], [0.0], [0.0], [0.0]])
+    #             self.arm_desired_twist_[3:6,:] = 0.0
+    #             self.arm_desired_twist_[0:2,:] = 0.0
+    #             pos_z_adjustment = 0.05
+    #             self.dx = 0
+    #             self.dy = 0
+    #         else:
+    #             # self.pose_err = np.mat([[-self.dx], [-self.dy], [0.0], [self.rx], [self.ry], [self.rz]])
+    #             self.pose_err = np.mat([[-self.dx], [-self.dy], [0.0], [0.0], [0.0], [self.rz]])
+    #         self.FT_err = np.mat([[0.0], [0.0], [pos_z_adjustment], [0.0], [0.0], [0.0]]) # 端面不平
+    #
+    #         self.arm_desired_twist_[np.abs(self.arm_desired_twist_) < 1e-7] = 0.0
+    #         self.pose_err[np.abs(self.pose_err) < 1e-7] = 0.0
+    #         coupling_wrench_arm = self.Inverse_M * force_external + self.stiffness * self.pose_err
+    #         arm_desired_accelaration = -self.damping * self.arm_desired_twist_ + coupling_wrench_arm + self.FT_err
+    #
+    #         arm_acc_norm = np.linalg.norm(arm_desired_accelaration[:, :3])
+    #         if (arm_acc_norm > self.arm_max_acc_):
+    #             # print("Admittance generates high arm accelaration!", arm_acc_norm)
+    #             arm_desired_accelaration[:, :3] *= (self.arm_max_acc_ / arm_acc_norm)
+    #         print("pose_err : ", self.pose_err, self.FT_err)
+    #
+    #         # 更新 arm_desired_twist_adm_
+    #         deta_arm_desired_twist = arm_desired_accelaration * self.duration
+    #         self.arm_desired_twist_ += deta_arm_desired_twist
+    #
+    #     return self.arm_desired_twist_, deta_arm_desired_twist
+
+    def apply_hybrid_controller(self, action, physicsClientId):
+        """ Make a step in simulation """
+        position_arrive = False
+        """
+        k=40,d=28.28,m=10
+        """
+        self.translational_stiffness = 40
+        self.rotational_stiffness = 40
+        self.translational_damping = 28.28
+        self.translational_damping = 28.28
+        self.duration = 0.001
+        self.zero_Orientation[0] = action[3]
+        self.zero_Orientation[1] = action[4]
+        self.zero_Orientation[2] = action[5]
+        self.zero_Orientation[3] = action[6]
+        self.reset_controller()
+        while 1:
+            desired_twist, deta_desired_twist = self.impedance_controller(action, physicsClientId)
+            desired_twist = np.array(desired_twist)
+            self.send_commands_to_robot(desired_twist[0], desired_twist[1], desired_twist[2], desired_twist[3], desired_twist[4], desired_twist[5], physicsClientId)
+            self.solve_steps = self.solve_steps + 1
+            print("self.force_error_z : ", self.force_error_z)
+            # print("self.position_error_y : ", self.position_error_y)
+            self.writer.add_scalars("force_error_z",
+                                   {"force_error_z": self.force_error_z}, self.solve_steps)
+            self.writer.add_scalars("rz",
+                                   {"rz": self.rz}, self.solve_steps)
+            self.writer.add_scalars("force_y",
+                                   {"force_y": self.force_y}, self.solve_steps)
+
+            if self.rz < 5e-6 or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
+                break
+                print("force err success")
+
+    def quaternion_to_euler(self, q1, q2):
+        # 将四元数转换为欧拉角(ZYX顺序)
+        rot1 = Rotation.from_quat(q1)
+        rot2 = Rotation.from_quat(q2)
+        euler1 = rot1.as_euler('zyx', degrees=True)
+        euler2 = rot2.as_euler('zyx', degrees=True)
+
+        # 计算角度差异(处理角度环绕)
+        diff = np.abs(euler2 - euler1)
+        diff = np.where(diff > 180, 360 - diff, diff)
+
+        return diff
+
+    def is_in_range(self, x, number, tol):
+        return x-tol <= number <= x+tol
+
+    def send_commands_to_robot(self, vx, vy, vz, wx, wy, wz, physicsClientId):
+        # 获取当前末端执行器的位置和姿态
+        end_pos, end_ori, com_trn, com_rot, frame_pos, frame_rot, link_vt, link_ve = p.getLinkState(self.ur5_id,
+                                                                                                    self.ur5EndEffectorIndex,
+                                                                                                    computeLinkVelocity=1,
+                                                                                                    computeForwardKinematics=1,
+                                                                                                    physicsClientId=physicsClientId)
+        joint_indices = []
+        num_joints = p.getNumJoints(self.ur5_id)
+        for i in range(num_joints):
+            joint_info = p.getJointInfo(self.ur5_id, i)
+            if joint_info[2] != p.JOINT_FIXED:  # 过滤掉固定关节
+                joint_indices.append(i)
+        # 获取当前关节状态
+        num_joints = len(joint_indices)
+        joint_positions = [p.getJointState(self.ur5_id, i, physicsClientId=physicsClientId)[0] for i in joint_indices ]
+        joint_velocities = [0] * num_joints  # 假设初始关节速度为0
+
+
+        # 计算雅可比矩阵
+        linear_jacobian, angular_jacobian = p.calculateJacobian(self.ur5_id, self.ur5EndEffectorIndex, localPosition=com_trn,
+                                                                objPositions=joint_positions,
+                                                                objVelocities=joint_velocities,
+                                                                objAccelerations=[0] * num_joints,
+                                                                physicsClientId=physicsClientId
+                                                                )
+        # 将线性和角速度的雅可比矩阵合并
+        jacobian = np.vstack((linear_jacobian, angular_jacobian))
+
+        # 笛卡尔空间的线速度和角速度
+        cartesian_velocity = np.array([vx, vy, vz, wx, wy, wz])  # vx, vy, vz 是线速度，wx, wy, wz 是角速度
+
+        # 计算关节速度
+        joint_velocities = np.linalg.pinv(jacobian) @ cartesian_velocity
+        for i, joint_index in enumerate(joint_indices):
+            p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=joint_velocities[i], force=500, physicsClientId=physicsClientId)
+                # ----------------------将更新频率设置为真实频率---------------------
+        p.setTimeStep(1.0 / self._timeStep)
+        for _ in range(240):
+            p.stepSimulation()
