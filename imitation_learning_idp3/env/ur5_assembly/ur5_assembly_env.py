@@ -290,7 +290,7 @@ class UR5Env:
         ##  第一步，连接仿真环境
         self.is_render = render
         if self.is_render:
-            self.physicsClient_use = p.connect(p.GUI)
+            self.physicsClient_use = p.connect(p.DIRECT)
             self.physicsClient_plan = p.connect(p.DIRECT)
         else:
             p.connect(p.DIRECT)
@@ -307,7 +307,7 @@ class UR5Env:
         self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
-                         lateralFriction=2, spinningFriction=2, rollingFriction=0, frictionAnchor=True)
+                         lateralFriction=0.5, spinningFriction=0.5, rollingFriction=0, frictionAnchor=True)
 
         #  直的
         p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32],
@@ -536,7 +536,7 @@ class UR5Env:
         R1 = R0.copy()
         planner0 = self.cal_planner(t0, R0, t1, R1, time0)
 
-        time1 = 2.0
+        time1 = 4.0
         t2 = t1.copy()
 
         end_peg_matrix1 = np.eye(4)
@@ -562,7 +562,7 @@ class UR5Env:
         R2 = sm.SO3(T1.R)
         planner1 = self.cal_planner(t1, R1, t2, R2, time1)
 
-        time3 = 0.5
+        time3 = 2.5
         t3 = t2.copy()
         # t3[2] -= 0.007
         R3 = R2.copy()
@@ -1113,7 +1113,7 @@ class UR5Env:
         action_to_target_orie[3] = action[6]
 
         wrench_z = Fext[2]
-        print("wrench_z : ", wrench_z)
+        # print("wrench_z : ", wrench_z)
 
         self.force_error_z = wrench_z - desired_force_z
         self.force_y = Fext[1]
@@ -1138,8 +1138,8 @@ class UR5Env:
         for i in range(1):
             if Fext[1] > 0.5 or Text[2] > 0.001 :
                 desired_force_rz = -0.1
-                desired_force_xy = 0.1
-            force_external = np.mat([[Fext[0] - desired_force_xy], [Fext[1] - desired_force_xy], [0.0], [0.0], [0.0], [Text[2] - desired_force_rz]])
+                desired_force_xy = -0.1
+            force_external = np.mat([[Fext[0] - desired_force_xy], [Fext[1] - desired_force_xy], [0.0], [Text[0] - desired_force_rz], [Text[1] - desired_force_rz], [Text[2] - desired_force_rz]])
             # force_external = np.mat([[0], [Fext[1]], [0], [0], [0], [0]])
 
             # 获取当前的关节状态
@@ -1153,17 +1153,17 @@ class UR5Env:
             orien_angle_err = 2 * np.arccos(self.orientation_err)
             self.angle_err = orien_angle_err * 180 / np.pi
             res = self.quaternion_to_euler(self.zero_Orientation, self.current_Orientation)
-            print("res: ", res)
+            # print("res: ", res)
 
             current_orie_matrix = Rotation.from_quat(self.current_Orientation).as_matrix()
             action_to_target_orie_matrix = Rotation.from_quat(self.zero_Orientation).as_matrix()
             target_orie_inv = action_to_target_orie_matrix.T
             quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
 
-            quat_rot_err_tmp = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
-            quat_rot_err_tmp = quat_rot_err_tmp * 100
+            quat_rot_err_ = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
+            quat_rot_err_tmp = quat_rot_err_ * 200
             # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
-            print("quat_rot_err_tmp: ", quat_rot_err_tmp)
+            # print("quat_rot_err_tmp: ", quat_rot_err_tmp)
 
             # Position error
             self.dx = action_to_current[0] / 1.0
@@ -1175,7 +1175,7 @@ class UR5Env:
             if self.rz < 1e-5:
                 dx = 0
             # self.pose_err = np.mat([[0.0], [-self.dy], [0.0], [0.0], [0.0], [0.0]])
-            self.pose_err = np.mat([[-self.dx], [-self.dy], [0.0], [0.0], [0.0], [-self.rz]])
+            self.pose_err = np.mat([[-self.dx], [-self.dy], [0.0], [-self.rx], [-self.ry], [-self.rz]])
             self.FT_err = np.mat([[0.0], [0.0], [pos_z_adjustment], [0.0], [0.0], [0.0]])
 
             coupling_wrench_arm = self.Inverse_M * force_external + self.stiffness * self.pose_err
@@ -1185,7 +1185,7 @@ class UR5Env:
             if (arm_acc_norm > self.arm_max_acc_):
                 # print("Admittance generates high arm accelaration!", arm_acc_norm)
                 arm_desired_accelaration[:, :3] *= (self.arm_max_acc_ / arm_acc_norm)
-            print("pose_err : ", self.pose_err, self.FT_err)
+            # print("pose_err : ", self.pose_err, self.FT_err)
 
             # 更新 arm_desired_twist_adm_
             deta_arm_desired_twist = arm_desired_accelaration * self.duration
@@ -1353,7 +1353,8 @@ class UR5Env:
             desired_twist = np.array(desired_twist)
             self.send_commands_to_robot(desired_twist[0], desired_twist[1], desired_twist[2], desired_twist[3], desired_twist[4], desired_twist[5], physicsClientId)
             self.solve_steps = self.solve_steps + 1
-            print("self.force_error_z : ", self.force_error_z)
+            # print("self.force_error_z : ", self.force_error_z)
+            joint_positions = p.getJointState(self.ur5_id, 6, physicsClientId=physicsClientId)[0]
             # print("self.position_error_y : ", self.position_error_y)
             self.writer.add_scalars("force_error_z",
                                    {"force_error_z": self.force_error_z}, self.solve_steps)
@@ -1361,10 +1362,11 @@ class UR5Env:
                                    {"rz": self.rz}, self.solve_steps)
             self.writer.add_scalars("force_y",
                                    {"force_y": self.force_y}, self.solve_steps)
-
+            self.writer.add_scalars("joint_positions",
+                                   {"joint_positions": joint_positions}, self.solve_steps)
             if self.rz < 5e-6 or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
+                # print("force err success")
                 break
-                print("force err success")
 
     def quaternion_to_euler(self, q1, q2):
         # 将四元数转换为欧拉角(ZYX顺序)
