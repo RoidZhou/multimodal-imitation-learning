@@ -33,4 +33,5 @@ dataset:
 
 env:
 #  _target_: imitation_learning_idp3.env.ur5_grasp.ur5_grasp_3d_env.UR5Grasp3dEnv
-  _target_: imitation_learning_idp3.env.ur5_assembly.ur5_assembly_env.UR5Env
+#  _target_: imitation_learning_idp3.env.ur5_assembly.ur5_assembly_env.UR5Env
+  _target_: imitation_learning_idp3.env.ur5_assembly.ur5_assembly_env_for_plot.UR5Env
