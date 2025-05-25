@@ -21,17 +21,20 @@ def plot_collect_data_trajectory(trajectories,  colors, labels):
         )
 
         # 在每个点绘制局部坐标系（调整step控制密度）
-        step = 2  # 每隔step个点画一个坐标系（1=全部点）
-        axis_length = 0.000002  # 缩短箭头长度避免重叠
+        step = 1  # 每隔step个点画一个坐标系（1=全部点）
+        axis_length = 0.000007  # 缩短箭头长度避免重叠
 
         for i in range(0, len(data), step):
             pos = data[i, :3]
-            end_orn_euler = R.from_quat(data[i, 3:7]).as_euler('xyz', degrees=True)
-            roll, pitch, yaw = end_orn_euler[0], end_orn_euler[1], end_orn_euler[2]
-            rot_matrix = R.from_euler('zyx', [yaw, pitch, roll]).as_matrix()
-
+            # end_orn_euler = R.from_quat(data[i, 3:7]).as_euler('xyz', degrees=True)
+            # roll, pitch, yaw = end_orn_euler[0], end_orn_euler[1], end_orn_euler[2]
+            # rot_matrix = R.from_euler('zyx', [yaw, pitch, roll]).as_matrix()
+            rot_matrix = R.from_quat(data[i, 3:7]).as_matrix()
+            quat = data[i, 3:7]
+            print(np.linalg.norm(quat))
+            print(np.allclose(rot_matrix.T @ rot_matrix, np.eye(3), atol=1e-6))
             # 绘制X/Y/Z轴（RGB颜色）
-            for axis, color in zip(rot_matrix.T, ['r', 'g', 'b']):
+            for axis, color in zip(rot_matrix.T, ['g', 'r', 'b']):
                 ax.quiver(
                     pos[0], pos[1], pos[2],
                     axis[0], axis[1], axis[2],
@@ -43,10 +46,13 @@ def plot_collect_data_trajectory(trajectories,  colors, labels):
                 )
 
     # 设置图形属性
+    # ax.set_xlim([-0.1, 0.5])
+    # ax.set_ylim([-0.1, 0.5])
+    ax.set_zlim([0.429999, 0.4301])
     ax.set_xlabel('X (m)')
     ax.set_ylabel('Y (m)')
     ax.set_zlabel('Z (m)')
-    ax.set_title('Robot 3D Trajectory with Euler Angle Frames')
+    # ax.set_title('Robot 3D Trajectory with Euler Angle Frames')
     ax.legend()
     plt.tight_layout()
     plt.show()
@@ -74,7 +80,7 @@ def plot_collect_data_forces_torques(force_torque, title):
                 label=force_labels[i]
             )
         ax_force.set_ylabel('Force (N)', fontsize=12)
-        ax_force.set_title(f'{title} - Force Components', fontsize=14)
+        # ax_force.set_title(f'{title} - Force Components', fontsize=14)
         ax_force.grid(True, linestyle='--', alpha=0.5)
         ax_force.legend(loc='upper right')
 
@@ -89,9 +95,9 @@ def plot_collect_data_forces_torques(force_torque, title):
                 linewidth=1.5,
                 label=torque_labels[i]
             )
-        ax_torque.set_xlabel('Data Point Index', fontsize=12)
+        ax_torque.set_xlabel('Steps', fontsize=12)
         ax_torque.set_ylabel('Torque (Nm)', fontsize=12)
-        ax_torque.set_title(f'{title} - Torque Components', fontsize=14)
+        # ax_torque.set_title(f'{title} - Torque Components', fontsize=14)
         ax_torque.grid(True, linestyle='--', alpha=0.5)
         ax_torque.legend(loc='upper right')
 
@@ -101,7 +107,7 @@ def plot_collect_data_forces_torques(force_torque, title):
 
 if __name__ == '__main__':
     # 加载所有轨迹文件
-    file_names = ["action1.npy", "action2.npy"]  # 或.csv
+    file_names = ["action2.npy"]  # 或.csv
     trajectories = [np.load(f) for f in file_names]  # 如果是.csv，用 np.loadtxt(f, delimiter=',')
 
     # 为每组轨迹设置颜色和标签
@@ -111,7 +117,7 @@ if __name__ == '__main__':
 
     plot_collect_data_trajectory(trajectories, colors, labels)
 
-    file_names = ["forces1.npy", "forces2.npy"]  # 或.csv
+    file_names = ["forces2.npy"]  # 或.csv
     trajectories = [np.load(f) for f in file_names]  # 如果是.csv，用 np.loadtxt(f, delimiter=',')
 
     # 为每组轨迹设置颜色和标签
