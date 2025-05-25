@@ -72,6 +72,7 @@ def hdqn_learning(
         state = env.reset()
         agent.first_goal_flag = 1
         Done = False
+        last_goal = 0
         episode_reward = 0
         meta_timestep += 1
         meta_epsilon = exploration_schedule.value(total_timestep)
@@ -81,6 +82,7 @@ def hdqn_learning(
             state_0 = state
             while True:
                 print("goal: ", goal)
+                last_goal = goal
                 total_timestep += 1
                 episode_length += 1
                 action_epsilon = exploration_schedule.value(total_timestep)
@@ -113,6 +115,9 @@ def hdqn_learning(
                 break
             meta_epsilon = exploration_schedule.value(total_timestep)
             goal = agent.select_goal(state, meta_epsilon)[0]  # one_hot:[0,1]
+            if goal == last_goal:
+                goal += 1
+                # break
         # Goal Finished
         env.writer.add_scalars("episode_reward",
                                 {"episode_reward": episode_reward}, meta_timestep)

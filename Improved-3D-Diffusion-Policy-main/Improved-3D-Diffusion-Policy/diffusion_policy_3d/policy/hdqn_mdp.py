@@ -179,7 +179,7 @@ class hDQN():
         class_indices = goal.item()  # shape: (B,)
         # if sample < action_epsilon:
         #     class_indices = 1-class_indices
-        if class_indices == 0:
+        if class_indices == 0 or class_indices == 1:
             # self.prepare_select_action_observation()
 
             if self.first_frame_observation == 1:
