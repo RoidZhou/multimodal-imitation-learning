@@ -169,6 +169,16 @@ def _6d_to_quaternion(sixd: np.ndarray) -> np.ndarray:
 
     return Rotation.from_matrix(full_matrix).as_quat()
 
+def draw_coordinate_frame(pos, orn, axis_length, lifetime):
+    rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+    axes = [
+        (pos, pos + rot_matrix[:, 0] * axis_length, [1, 0, 0]),  # X
+        (pos, pos + rot_matrix[:, 1] * axis_length, [0, 1, 0]),  # Y
+        (pos, pos + rot_matrix[:, 2] * axis_length, [0, 0, 1])   # Z
+    ]
+    for start, end, color in axes:
+        p.addUserDebugLine(start, end, color, lineWidth=1, lifeTime=lifetime)
+
 class DebugAxes(object):
     """
     可视化某个局部坐标系, 红色x轴, 绿色y轴, 蓝色z轴
@@ -307,7 +317,7 @@ class UR5Env:
         self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
-                         lateralFriction=0.5, spinningFriction=0.5, rollingFriction=0, frictionAnchor=True)
+                         lateralFriction=0.1, spinningFriction=0.1, rollingFriction=0, frictionAnchor=True)
 
         #  直的
         p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32],
@@ -325,6 +335,7 @@ class UR5Env:
         self.ur5_id_plan = p.loadURDF(
             "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
             basePosition=[0, 0, 0.1], flags=9, physicsClientId = self.physicsClient_plan)
+        p.changeVisualShape(self.ur5_id, 8, rgbaColor=[0.1,0.1,0.1,0.3])
         self.ur5EndEffectorIndex = 7
         self.numdof = 6
         self.numjoint = p.getNumJoints(self.ur5_id)
@@ -339,7 +350,7 @@ class UR5Env:
         hole_orientation = p.getBasePositionAndOrientation(self.tool_id[0])[1]
         self.obj_t = hole_position
         self.obj_r = hole_orientation
-        self.goalPosition_hole.update(hole_position, hole_orientation)
+        # self.goalPosition_hole.update(hole_position, hole_orientation)
         # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
         # obs = self.get_observation()
         # observation_vw_shape = obs["achieved_goal"].shape
@@ -419,6 +430,38 @@ class UR5Env:
         self.position_matrix_ = np.diag(np.array([1, 1, 0, 0, 0, 0]))
         self.force_matrix = np.mat(self.force_matrix_)
         self.position_matrix = np.mat(self.position_matrix_)
+        self.pre_dz = 0.0
+        self.insert_depth = 0.0
+
+    def test_hybrid_controller(self):
+        desired_t = self.hole_up_end
+        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        peg_position = desired_t
+        peg_position[2] -= 0.002
+        peg_orientation = robot_position[1]
+        self.apply_hybrid_controller(np.concatenate((desired_t, peg_orientation), axis=0),
+                                     physicsClientId=self.physicsClient_use)
+        # self.reset()
+        angles = []
+        angles_select = [-150, -30, 90, 210]
+        for i in range(4):
+            hole_orientation = Rotation.from_euler('xyz', [90, 90, -150+120*i], degrees=True).as_quat()  # 默认固定孔的姿态
+
+            robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            state_orientation = robot_state_position[1]
+            orientation_err = np.dot(hole_orientation, state_orientation)
+            orien_angle_err = 2*np.arccos(orientation_err)
+            angle_err = orien_angle_err*180/np.pi
+            angles.append(angle_err)
+        angle_target = angles_select[argmin(angles)]
+        hole_orientation = Rotation.from_euler('xyz', [90, 90, angle_target], degrees=True).as_quat()  # 默认固定孔的姿态
+
+        peg_orientation = np.array(hole_orientation)
+
+        desired_r = peg_orientation
+
+        self.apply_hybrid_controller(np.concatenate((desired_t, desired_r), axis=0),
+                                     physicsClientId=self.physicsClient_use)
 
     def reset(self):
         self.goal_cont=0
@@ -459,9 +502,12 @@ class UR5Env:
         # 定义平移
         current_pos = p.getLinkState(self.ur5_id, 7)[4]
         current_orie = p.getLinkState(self.ur5_id, 7)[5]
+        current_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
+        self.prev_pos = current_peg_pos
+        self.trail_duration = 6000
         #打印出效果用
         self.inint_orie_print =current_orie
-        self.goalPosition_eelink.update(current_pos,current_orie)
+        # self.goalPosition_eelink.update(current_pos,current_orie)
         random.seed(self.randm_num)
         theta = random.uniform(0, 2*math.pi)
         deltaR = random.uniform(0.0000, 0.0003)
@@ -536,7 +582,7 @@ class UR5Env:
         R1 = R0.copy()
         planner0 = self.cal_planner(t0, R0, t1, R1, time0)
 
-        time1 = 4.0
+        time1 = 8.0
         t2 = t1.copy()
 
         end_peg_matrix1 = np.eye(4)
@@ -689,6 +735,21 @@ class UR5Env:
             # self.control_joints_to_target(self.ur5_id, desired_poses[time_num, :], self.control_joint_ids,
             #                               physicsClientId=self.physicsClient_use)
             self.apply_hybrid_controller(np.concatenate((desired_cart_t[time_num, :], desired_cart_r[time_num, :]), axis=0), physicsClientId=self.physicsClient_use)
+            """ draw contact phase result """
+            cur_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
+            cur_peg_orie = p.getLinkState(self.ur5_id, 8)[5]
+            if self.prev_pos is not None:
+                # 绘制线段连接当前位置和上一个位置
+                p.addUserDebugLine(self.prev_pos, cur_peg_pos,
+                                   lineColorRGB=[0.0, 1.0, 1.0],  # 红色
+                                   lineWidth=4,
+                                   lifeTime=self.trail_duration)
+
+            self.prev_pos = cur_peg_pos
+            # 关键帧绘制坐标系
+            if time_num % 100 == 0:
+                draw_coordinate_frame(cur_peg_pos, cur_peg_orie, axis_length=0.01, lifetime=0)
+            """ draw contact phase result """
             time_until_next_step = 1/self._timeStep - (time.time() - step_start)
             if time_until_next_step > 0:
                 time.sleep(time_until_next_step)
@@ -881,7 +942,7 @@ class UR5Env:
     def get_observation(self):
         self.camera_Position = p.getLinkState(self.ur5_id, 8, computeForwardKinematics=1)[0]
         self.camera_Orientation = p.getLinkState(self.ur5_id, 8, computeForwardKinematics=1)[1]
-        self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
+        # self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
         self.cube_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
         self.cube_position = [-0.35, 0.0 ,0.35]
         self.camera_in_world = [-0.6, 0.2, 0.7]
@@ -1072,8 +1133,8 @@ class UR5Env:
                                                                     relative_offset[2]], [0, 0, 0])
         peg_link_Quaternion = Rotation.from_matrix(peg_link_Rotation_matrix[:3, :3]).as_quat()
         peg_link_pos = peg_link_Rotation_matrix[:3, -1]
-        if UI == True:
-            self.Visualize_rotation_center_UI.update(peg_link_pos, peg_link_Quaternion)
+        # if UI == True:
+        #     self.Visualize_rotation_center_UI.update(peg_link_pos, peg_link_Quaternion)
 
         return [peg_link_pos, peg_link_Quaternion]
 
@@ -1137,7 +1198,7 @@ class UR5Env:
             print("wrench_z : ", wrench_z)
             pos_z_adjustment = pos_z_adjustment
         for i in range(1):
-            if Fext[1] > 0.5 or Text[2] > 0.001 :
+            if Fext[1] > 0.1 or Text[2] > 0.001 :
                 desired_force_rz = -0.1
                 desired_force_xy = -0.1
             force_external = np.mat([[Fext[0] - desired_force_xy], [Fext[1] - desired_force_xy], [0.0], [Text[0] - desired_force_rz], [Text[1] - desired_force_rz], [Text[2] - desired_force_rz]])
@@ -1162,14 +1223,21 @@ class UR5Env:
             quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
 
             quat_rot_err_ = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
-            quat_rot_err_tmp = quat_rot_err_ * 200
+            quat_rot_err_tmp = quat_rot_err_ / 1
             # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
             # print("quat_rot_err_tmp: ", quat_rot_err_tmp)
 
+            if self.pre_dz == 0.0:
+                self.deta_dz = self.current_Position[2]
+                self.pre_dz = self.current_Position[2]
+            else:
+                self.deta_dz = self.pre_dz - self.current_Position[2]
+                self.pre_dz = self.current_Position[2]
+            self.insert_depth += self.deta_dz
             # Position error
-            self.dx = action_to_current[0] / 1.0
-            self.dy = action_to_current[1] / 1.0
-            self.dz = action_to_current[2] / 1.0
+            self.dx = action_to_current[0] * 100.0
+            self.dy = action_to_current[1] * 100.0
+            self.dz = action_to_current[2] * 100.0
             self.rx = quat_rot_err_tmp[0]
             self.ry = quat_rot_err_tmp[1]
             self.rz = quat_rot_err_tmp[2]
@@ -1333,7 +1401,7 @@ class UR5Env:
     #
     #     return self.arm_desired_twist_, deta_arm_desired_twist
 
-    def apply_hybrid_controller(self, action, physicsClientId):
+    def apply_hybrid_controller(self, action, physicsClientId, if_test=False):
         """ Make a step in simulation """
         position_arrive = False
         """
@@ -1365,8 +1433,10 @@ class UR5Env:
                                    {"force_y": self.force_y}, self.solve_steps)
             self.writer.add_scalars("joint_positions",
                                    {"joint_positions": joint_positions}, self.solve_steps)
-            if self.rz < 5e-6 or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
-                # print("force err success")
+            # if (self.rz < 5e-6 and self.dz < 5e-6) or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
+            if (abs(self.rz) < 5e-2 and abs(self.deta_dz) < 5e-8) or self.insert_depth > 0.435 or self.solve_steps > 3000:
+            # if (abs(self.rz) < 5e-6):
+                print("force err success")
                 break
 
     def quaternion_to_euler(self, q1, q2):
@@ -1420,8 +1490,11 @@ class UR5Env:
         # 计算关节速度
         joint_velocities = np.linalg.pinv(jacobian) @ cartesian_velocity
         for i, joint_index in enumerate(joint_indices):
-            p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=joint_velocities[i], force=500, physicsClientId=physicsClientId)
+            if joint_index == 6:
+                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, velocityGain=2, targetVelocity=joint_velocities[i], force=4000, physicsClientId=physicsClientId)
+            else:
+                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=joint_velocities[i], force=1000, physicsClientId=physicsClientId)
                 # ----------------------将更新频率设置为真实频率---------------------
         p.setTimeStep(1.0 / self._timeStep)
-        for _ in range(240):
+        for _ in range(10):
             p.stepSimulation()

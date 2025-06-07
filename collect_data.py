@@ -65,6 +65,16 @@ def main(cfg: OmegaConf):
     forces = np.array([])
     episode_ends = []
 
+    """
+    test hybrid force/position controller
+    """
+    while True:
+        env.reset()
+        env.test_hybrid_controller()
+    """
+    test hybrid force/position controller
+    """
+
     for i in range(num):
         env.reset()
         data = env.run()
