@@ -329,7 +329,7 @@ class UR5Env:
         ##  第一步，连接仿真环境
         self.is_render = render
         if self.is_render:
-            self.physicsClient_use = p.connect(p.GUI)
+            self.physicsClient_use = p.connect(p.DIRECT)
             self.physicsClient_plan = p.connect(p.DIRECT)
         else:
             p.connect(p.DIRECT)
@@ -614,7 +614,7 @@ class UR5Env:
                 if self.goal == 1:
                     self.apply_hybrid_controller(
                         np.concatenate((robot_state_position, robot_srate_orientation)),
-                        physicsClientId=self.physicsClient_use)
+                        physicsClientId=self.physicsClient_use, if_test = True)
                 else:
                     self.target_joint = p.calculateInverseKinematics(
                         bodyUniqueId=self.ur5_id,
@@ -662,7 +662,7 @@ class UR5Env:
         #     return observation, reward, done, info
 
         if self.goal == 0:
-            if min(angles) < 2 and self.goal_0_reach == 0:
+            if min(angles) < 4 and self.goal_0_reach == 0:
                 self.goal_0_reach = 1
                 reward = 1
             if insert_depth > 0.004 and self.goal_0_reach == 0:
@@ -1169,7 +1169,7 @@ class UR5Env:
             print("wrench_z : ", wrench_z)
             pos_z_adjustment = pos_z_adjustment
         for i in range(1):
-            if Fext[1] > 0.5 or Text[2] > 0.001 :
+            if Fext[1] > 0.1 or Text[2] > 0.001 :
                 desired_force_rz = -0.1
                 desired_force_xy = -0.1
             force_external = np.mat([[Fext[0] - desired_force_xy], [Fext[1] - desired_force_xy], [0.0], [Text[0] - desired_force_rz], [Text[1] - desired_force_rz], [Text[2] - desired_force_rz]])
@@ -1181,14 +1181,6 @@ class UR5Env:
             action_to_current[0] = self.current_Position[0] - action_to_target_pose[0]  # 计算当前位置与目标位置的差值
             action_to_current[1] = self.current_Position[1] - action_to_target_pose[1]
             action_to_current[2] = self.current_Position[2] - action_to_target_pose[2]
-
-            if self.first_pose_to_depth_flag == 1:
-                self.first_position = self.current_Position[2]
-                self.first_pose_to_depth_flag = 0
-            else:
-                self.impedance_depth = self.first_position - self.current_Position[2]
-            if self.impedance_depth > 0.005:
-                self.impedance_arrive = 1
 
             self.orientation_err = np.dot(self.current_Orientation, self.zero_Orientation)
             orien_angle_err = 2 * np.arccos(self.orientation_err)
@@ -1202,14 +1194,23 @@ class UR5Env:
             quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
 
             quat_rot_err_ = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
-            quat_rot_err_tmp = quat_rot_err_/100
+            quat_rot_err_tmp = quat_rot_err_ / 1 # for test, is related to the size of target pose that is input
+            # quat_rot_err_tmp = quat_rot_err_ * 60
+            self.rz_tmp = quat_rot_err_[2]
             # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
             # print("quat_rot_err_tmp: ", quat_rot_err_tmp)
 
+            if self.pre_dz == 0.0:
+                self.deta_dz = self.current_Position[2]
+                self.pre_dz = self.current_Position[2]
+            else:
+                self.deta_dz = self.pre_dz - self.current_Position[2]
+                self.pre_dz = self.current_Position[2]
+            self.insert_depth += self.deta_dz
             # Position error
-            self.dx = action_to_current[0] / 1.0
-            self.dy = action_to_current[1] / 1.0
-            self.dz = action_to_current[2] / 1.0
+            self.dx = action_to_current[0] * 100.0
+            self.dy = action_to_current[1] * 100.0
+            self.dz = action_to_current[2] * 100.0
             self.rx = quat_rot_err_tmp[0]
             self.ry = quat_rot_err_tmp[1]
             self.rz = quat_rot_err_tmp[2]
@@ -1246,8 +1247,10 @@ class UR5Env:
         self.position_matrix_ = np.diag(np.array([1, 1, 0, 0, 0, 0]))
         self.force_matrix = np.mat(self.force_matrix_)
         self.position_matrix = np.mat(self.position_matrix_)
+        self.pre_dz = 0.0
+        self.insert_depth = 0.0
 
-    def apply_hybrid_controller(self, action, physicsClientId):
+    def apply_hybrid_controller(self, action, physicsClientId, if_test=False):
         """ Make a step in simulation """
         position_arrive = False
         """
@@ -1279,9 +1282,17 @@ class UR5Env:
                                    {"force_y": self.force_y}, self.solve_steps)
             self.writer.add_scalars("joint_positions",
                                    {"joint_positions": joint_positions}, self.solve_steps)
-            if self.rz < 5e-5 or self.impedance_arrive == 1 or self.solve_steps > 500 or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
-                print("force err success")
-                break
+            # if (self.rz < 5e-6 and self.dz < 5e-6) or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
+            if if_test == True:
+                if (abs(self.rz) < 5e-2 and abs(self.deta_dz) < 5e-8) or self.insert_depth > 0.435 or self.solve_steps > 3000:
+                # if (abs(self.rz) < 5e-6):
+                    print("force err success")
+                    break
+            else:
+                if (abs(self.rz_tmp) < 5e-3) or self.insert_depth > 0.435 or self.solve_steps > 1000:
+                    # if (abs(self.rz) < 5e-6):
+                    print("force err success")
+                    break
 
     def quaternion_to_euler(self, q1, q2):
         # 将四元数转换为欧拉角(ZYX顺序)
