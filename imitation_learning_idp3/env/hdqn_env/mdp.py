@@ -246,6 +246,7 @@ class UR5Env:
         self.arm_desired_twist_ = np.mat(np.zeros((6, 1)))
         self.arm_desired_position_ = np.mat(np.zeros((3, 1)))
         self.arm_max_acc_ = 1
+        self.arm_max_acc_r = 10
         self.duration = 0.2
         self.obj_t = np.zeros(3)
         self.num_points = 4096 * 2
@@ -347,7 +348,7 @@ class UR5Env:
         self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
-                         lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
+                         lateralFriction=0.1, spinningFriction=0.1, rollingFriction=0, frictionAnchor=True)
 
         #  直的
         p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32],
@@ -607,7 +608,7 @@ class UR5Env:
             robot_state_position = np.array(robot_state[0])
             FT = self.getForceTorque()
             current_force = np.array([FT[0], FT[1], FT[2]])
-            # print("---- force ---", current_force)
+            print("---- force ---", current_force)
 
             if np.linalg.norm(current_force) < -1:
                 robot_state_position[2] -= 0.009
@@ -676,18 +677,17 @@ class UR5Env:
             # if self.goal_0_reach == 0:
             #     done = True
             #     reward = 0
+            if self.orien_failed == 1:
+                reward = 0
+                done = True
             if insert_depth > 0.004 and self.goal_1_reach == 0:
                 # done = True
                 reward = 2
                 self.goal_1_reach = 1
-            # if insert_depth > 0.007:
-            #     done = True
-            #     reward = 3
-            if abs(current_force[2]) < 10 and self.goal_1_reach == 0 and self.goal_0_reach == 1:
-                reward = 0
-            elif abs(current_force[2]) < 100 and self.goal_1_reach == 0 and self.goal_0_reach == 1:
-                reward = -0
-            elif abs(current_force[2]) > 100 and self.goal_0_reach == 0:
+            if insert_depth > 0.007:
+                done = True
+                reward = 3
+            if (abs(current_force[0]) > 20 or abs(current_force[1]) > 20 or abs(current_force[2]) > 20) and self.goal_0_reach == 1:
                 reward = -0
                 done = True
             elif abs(current_force[2]) > 100 and self.goal_0_reach == 1 and self.goal_1_reach == 0:
@@ -1125,7 +1125,7 @@ class UR5Env:
         desired_force_xy = 0.0  # N
         desired_force_rz = 0.0
         Kp_force = 5  # 比例增益
-        Ki_force = 0.4  # 积分增益
+        Ki_force = 2  # 积分增益
         Kd_force = 0.01  # 微分增益
         integral_force_error_z = 0.0
         previous_force_error_z = 0.0
@@ -1164,10 +1164,10 @@ class UR5Env:
         #  Kd_force * derivative_force_error_z
         force_z_adjustment = force_control_output_z
         pos_z_adjustment = max(min(force_z_adjustment, delta_z_max), -delta_z_max)
-        pos_z_adjustment = pos_z_adjustment / 100  # 手动补偿
+        pos_z_adjustment_compensate = pos_z_adjustment / 100  # 手动补偿
         if wrench_z > 0.1:
             print("wrench_z : ", wrench_z)
-            pos_z_adjustment = pos_z_adjustment
+            pos_z_adjustment_compensate = pos_z_adjustment_compensate
         for i in range(1):
             if Fext[1] > 0.1 or Text[2] > 0.001 :
                 desired_force_rz = -0.1
@@ -1194,8 +1194,25 @@ class UR5Env:
             quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
 
             quat_rot_err_ = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
-            quat_rot_err_tmp = quat_rot_err_ / 1 # for test, is related to the size of target pose that is input
-            # quat_rot_err_tmp = quat_rot_err_ * 60
+            # quat_rot_err_tmp = quat_rot_err_ / 1 # for test, is related to the size of target pose that is input
+
+            if quat_rot_err_[2] > np.pi/3:
+                self.orien_failed = 1
+                temp_rz_err = quat_rot_err_[2] * 180 / np.pi
+                angles = []
+                angles_select = [-150, -30, 90, 120, 210]
+                for i in range(4):
+                    hole_orientation = Rotation.from_euler('xyz', [90, 90, -150 + 120 * i],
+                                                           degrees=True).as_quat()  # 默认固定孔的姿态
+
+                    orientation_err = np.dot(hole_orientation, self.current_Orientation)
+                    orien_angle_err = 2 * np.arccos(orientation_err)
+                    angle_err = orien_angle_err * 180 / np.pi
+                    angles.append(angle_err)
+                angle_target = -min(angles)
+                quat_rot_err_[2] = (180 - res[2]) * np.pi / 180
+                print("over pi/3")
+            quat_rot_err_tmp = quat_rot_err_ * 60
             self.rz_tmp = quat_rot_err_[2]
             # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
             # print("quat_rot_err_tmp: ", quat_rot_err_tmp)
@@ -1249,6 +1266,8 @@ class UR5Env:
         self.position_matrix = np.mat(self.position_matrix_)
         self.pre_dz = 0.0
         self.insert_depth = 0.0
+        self.solve_steps = 0
+        self.orien_failed = 0
 
     def apply_hybrid_controller(self, action, physicsClientId, if_test=False):
         """ Make a step in simulation """
@@ -1269,7 +1288,11 @@ class UR5Env:
         while 1:
             desired_twist, deta_desired_twist = self.impedance_controller(action, physicsClientId)
             desired_twist = np.array(desired_twist)
+            print("desired_twist: ", desired_twist)
             self.send_commands_to_robot(desired_twist[0], desired_twist[1], desired_twist[2], desired_twist[3], desired_twist[4], desired_twist[5], physicsClientId)
+            current_Position = p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[4]
+            current_Orientation = np.array(p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[5])
+
             self.solve_steps = self.solve_steps + 1
             # print("self.force_error_z : ", self.force_error_z)
             joint_positions = p.getJointState(self.ur5_id, 6, physicsClientId=physicsClientId)[0]
@@ -1289,6 +1312,8 @@ class UR5Env:
                     print("force err success")
                     break
             else:
+                if self.orien_failed == 1:
+                    break
                 if (abs(self.rz_tmp) < 5e-3) or self.insert_depth > 0.435 or self.solve_steps > 1000:
                     # if (abs(self.rz) < 5e-6):
                     print("force err success")
@@ -1345,8 +1370,11 @@ class UR5Env:
         # 计算关节速度
         joint_velocities = np.linalg.pinv(jacobian) @ cartesian_velocity
         for i, joint_index in enumerate(joint_indices):
-            p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=joint_velocities[i], force=500, physicsClientId=physicsClientId)
+            if joint_index == 6:
+                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, velocityGain=0.8, targetVelocity=joint_velocities[i], force=4000, physicsClientId=physicsClientId)
+            else:
+                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=joint_velocities[i], force=1000, physicsClientId=physicsClientId)
                 # ----------------------将更新频率设置为真实频率---------------------
         p.setTimeStep(1.0 / self._timeStep)
-        for _ in range(240):
+        for _ in range(20):
             p.stepSimulation()

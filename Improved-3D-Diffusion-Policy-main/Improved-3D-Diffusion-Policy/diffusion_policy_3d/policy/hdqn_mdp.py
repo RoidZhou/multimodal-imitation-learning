@@ -10,7 +10,7 @@ import torch.autograd as autograd
 
 from utils.replay_memory import ReplayMemory, Transition
 from diffusion_policy_3d.model.common.normalizer import LinearNormalizer
-from diffusion_policy_3d.model.vision.multimodal_obs_encoder import MultiModalObsEncoder
+from diffusion_policy_3d.model.vision.multimodal_obs_encoder import MultiModalObsEncoder, Encoder2rlLayer
 from diffusion_policy_3d.policy.diffusion_unet_image_policy import DiffusionUnetImagePolicy
 from diffusion_policy_3d.common.pytorch_util import dict_apply
 import yaml
@@ -112,16 +112,19 @@ class hDQN():
         self.obs_encoder.load_state_dict(features_dict)
         self.target_obs_encoder = obs_encoder.to(self.device)
         self.target_obs_encoder.load_state_dict(features_dict)
-        fc = nn.Linear(1027, 3)  # 定义全连接层
+        fc = Encoder2rlLayer(1027, 128, 3)  # 定义全连接层
+        target_fc = Encoder2rlLayer(1027, 128, 3)  # 定义全连接层
         self.fc = fc.to(self.device)
-        self.meta_controller = MetaController().type(dtype)
-        self.target_meta_controller = MetaController().type(dtype)
+        self.target_fc = target_fc.to(self.device)
+        # self.meta_controller = MetaController().type(dtype)
+        # self.target_meta_controller = MetaController().type(dtype)
         self.controller = Controller().type(dtype)
         self.target_controller = Controller().type(dtype)
         # Construct the optimizers for meta-controller and controller
-        self.meta_optimizer = optimizer_spec.constructor(self.meta_controller.parameters(), **optimizer_spec.kwargs)
-        self.ctrl_optimizer = optimizer_spec.constructor(self.controller.parameters(), **optimizer_spec.kwargs)
+        # self.meta_optimizer = optimizer_spec.constructor(self.meta_controller.parameters(), **optimizer_spec.kwargs)
+        # self.ctrl_optimizer = optimizer_spec.constructor(self.controller.parameters(), **optimizer_spec.kwargs)
         self.obs_encoder_optimizer = optimizer_spec.constructor(self.obs_encoder.parameters(), **optimizer_spec.kwargs)
+        self.fc_optimizer = optimizer_spec.constructor(self.fc.parameters(), **optimizer_spec.kwargs)
         # Construct the replay memory for meta-controller and controller
         self.meta_replay_memory = ReplayMemory(replay_memory_size)
         self.ctrl_replay_memory = ReplayMemory(replay_memory_size)
@@ -131,7 +134,8 @@ class hDQN():
         self.n_obs_steps = 2
         self.first_frame_observation = 1
         self.first_goal_flag = 1
-
+        self.update_count = 0
+        self.target_update_frequency = 200
 
     def get_intrinsic_reward(self, goal, state):
         return state
@@ -223,7 +227,7 @@ class hDQN():
 
         return self.actions
 
-    def update_meta_controller(self, gamma=1.0):
+    def update_meta_controller0(self, gamma=1.0):
         if len(self.meta_replay_memory) < self.batch_size:
             return
 
@@ -240,12 +244,12 @@ class hDQN():
         state_batch = dict_apply(state_batch, lambda x: x.to(self.device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
         next_state_batch = dict_apply(next_state_batch, lambda x: x.to(self.device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
         # We choose Q based on goal chosen.
-        current_Q = self.obs_encoder(state_batch)
-        current_Q = self.fc(current_Q)
         # print("tensor1", current_Q.device)
         # print("tensor2", goal_batch.device)
         with torch.no_grad():
             goal_indices = goal_batch.view(-1, 1)
+            current_Q = self.obs_encoder(state_batch)
+        current_Q = self.fc(current_Q)
         current_Q_values = torch.gather(current_Q, 1, goal_indices)
 
         # Compute next Q value based on which goal gives max Q values
@@ -276,41 +280,62 @@ class hDQN():
                 param.grad = param.grad.clamp(-1, 1)  # 非原地操作
         self.obs_encoder_optimizer.step()
 
+    def update_meta_controller(self, gamma=0.99):
+        # 冻结 obs_encoder
+        for param in self.obs_encoder.parameters():
+            param.requires_grad = False
+
+        if len(self.meta_replay_memory) < self.batch_size:
+            return
+
+        # 从经验回放中采样
+        state_batch, goal_batch, next_state_batch, ex_reward_batch, done_mask = \
+            self.meta_replay_memory.sample(self.prepare_train_observation, self.horizon, self.batch_size,
+                                           self.n_obs_steps)
+
+        # 转换为Tensor并移到设备
+        goal_batch = torch.from_numpy(goal_batch).long().to(self.device, non_blocking=True)
+        ex_reward_batch = torch.from_numpy(ex_reward_batch).to(self.device, non_blocking=True)
+        not_done_mask = torch.from_numpy(1 - done_mask).to(self.device, non_blocking=True)
+        state_batch = dict_apply(state_batch,
+                                 lambda x: x.to(self.device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
+        next_state_batch = dict_apply(next_state_batch, lambda x: x.to(self.device, non_blocking=True) if isinstance(x,
+                                                                                                                     torch.Tensor) else x)
+
+        # 计算当前Q值
+        with torch.no_grad():
+            encoder_feature = self.obs_encoder(state_batch)
+        current_Q = self.fc(encoder_feature)
+        goal_indices = goal_batch.view(-1, 1)
+        current_Q_values = torch.gather(current_Q, 1, goal_indices)
+
+        # 计算目标Q值
+        with torch.no_grad():
+            next_Q = self.target_fc(self.target_obs_encoder(next_state_batch))
+            next_max_q = next_Q.max(1)[0]
+            next_Q_values = not_done_mask * next_max_q
+            target_Q_values = ex_reward_batch + (gamma * next_Q_values)
+
+        # 计算Huber Loss
+        loss = F.smooth_l1_loss(current_Q_values, target_Q_values, reduction='mean')
+
+        # 优化模型
+        self.obs_encoder_optimizer.zero_grad()
+        self.fc_optimizer.zero_grad()  # 假设fc有单独的优化器
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.obs_encoder.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(self.fc.parameters(), max_norm=1.0)
+        self.obs_encoder_optimizer.step()
+        self.fc_optimizer.step()
+
+        # 更新目标网络（每隔target_update_frequency步）
+        if self.update_count % self.target_update_frequency == 0:
+            self.target_obs_encoder.load_state_dict(self.obs_encoder.state_dict())
+            self.target_fc.load_state_dict(self.fc.state_dict())
+        self.update_count += 1
+
     def update_ob_encoder(self):
         self.obs_encoder()
-
-    def update_controller(self, gamma=1.0):
-        if len(self.ctrl_replay_memory) < self.batch_size:
-            return
-        state_goal_batch, action_batch, next_state_goal_batch, in_reward_batch, done_mask = \
-            self.ctrl_replay_memory.sample(self.batch_size)
-        state_goal_batch = Variable(torch.from_numpy(state_goal_batch).type(dtype))
-        action_batch = Variable(torch.from_numpy(action_batch).long())
-        next_state_goal_batch = Variable(torch.from_numpy(next_state_goal_batch).type(dtype))
-        in_reward_batch = Variable(torch.from_numpy(in_reward_batch).type(dtype))
-        not_done_mask = Variable(torch.from_numpy(1 - done_mask)).type(dtype)
-        if USE_CUDA:
-            action_batch = action_batch.cuda()
-        # Compute current Q value, controller takes only (state, goal) and output value for every (state, goal)-action pair
-        # We choose Q based on action taken.
-        current_Q_values = self.controller()(state_goal_batch).gather(1, action_batch.unsqueeze(1))
-        # Compute next Q value based on which goal gives max Q values
-        # Detach variable from the current graph since we don't want gradients for next Q to propagated
-        next_max_q = self.target_controller(next_state_goal_batch).detach().max(1)[0]
-        next_Q_values = not_done_mask * next_max_q
-        # Compute the target of the current Q values
-        target_Q_values = in_reward_batch + (gamma * next_Q_values)
-        # Compute Bellman error (using Huber loss)
-        loss = F.smooth_l1_loss(current_Q_values, target_Q_values)
-
-        # Copy Q to target Q before updating parameters of Q
-        self.target_controller.load_state_dict(self.controller.state_dict())
-        # Optimize the model
-        self.ctrl_optimizer.zero_grad()
-        loss.backward()
-        for param in self.controller.parameters():
-            param.grad.data.clamp_(-1, 1)
-        self.ctrl_optimizer.step()
 
     # 准备输入数据
     def prepare_eval_observation(self, obs):

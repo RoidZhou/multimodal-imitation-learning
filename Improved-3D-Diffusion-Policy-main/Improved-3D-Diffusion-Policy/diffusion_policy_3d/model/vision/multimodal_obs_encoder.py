@@ -195,3 +195,20 @@ class MultiModalObsEncoder(ModuleAttrMixin):
         example_output = self.forward(example_obs_dict)
         output_shape = example_output.shape[1:]
         return output_shape
+
+class Encoder2rlLayer(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(Encoder2rlLayer, self).__init__()
+        # 第一层全连接层
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        # 激活函数（例如ReLU）
+        self.relu = nn.ReLU()
+        # 第二层全连接层
+        self.fc2 = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        # 前向传播
+        x = self.fc1(x)    # 第一层
+        x = self.relu(x)   # 激活函数
+        x = self.fc2(x)    # 第二层
+        return x
