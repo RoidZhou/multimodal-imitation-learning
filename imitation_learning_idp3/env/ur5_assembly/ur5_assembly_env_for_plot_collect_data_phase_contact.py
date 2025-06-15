@@ -440,7 +440,7 @@ class UR5Env:
         peg_position[2] -= 0.002
         peg_orientation = robot_position[1]
         self.apply_hybrid_controller(np.concatenate((desired_t, peg_orientation), axis=0),
-                                     physicsClientId=self.physicsClient_use)
+                                     physicsClientId=self.physicsClient_use, if_test=True)
         # self.reset()
         angles = []
         angles_select = [-150, -30, 90, 210]
@@ -461,7 +461,7 @@ class UR5Env:
         desired_r = peg_orientation
 
         self.apply_hybrid_controller(np.concatenate((desired_t, desired_r), axis=0),
-                                     physicsClientId=self.physicsClient_use)
+                                     physicsClientId=self.physicsClient_use, if_test=True)
 
     def reset(self):
         self.goal_cont=0
@@ -1195,7 +1195,7 @@ class UR5Env:
         pos_z_adjustment = max(min(force_z_adjustment, delta_z_max), -delta_z_max)
         pos_z_adjustment = pos_z_adjustment / 100  # 手动补偿
         if wrench_z > 0.1:
-            print("wrench_z : ", wrench_z)
+            # print("wrench_z : ", wrench_z)
             pos_z_adjustment = pos_z_adjustment
         for i in range(1):
             if Fext[1] > 0.1 or Text[2] > 0.001 :
@@ -1223,7 +1223,9 @@ class UR5Env:
             quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
 
             quat_rot_err_ = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
-            quat_rot_err_tmp = quat_rot_err_ / 1
+            quat_rot_err_tmp = quat_rot_err_ / 1 # for test, is related to the size of target pose that is input
+            # quat_rot_err_tmp = quat_rot_err_ * 60
+            self.rz_tmp = quat_rot_err_[2]
             # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
             # print("quat_rot_err_tmp: ", quat_rot_err_tmp)
 
@@ -1420,6 +1422,7 @@ class UR5Env:
         while 1:
             desired_twist, deta_desired_twist = self.impedance_controller(action, physicsClientId)
             desired_twist = np.array(desired_twist)
+            print("desired_twist: ", desired_twist)
             self.send_commands_to_robot(desired_twist[0], desired_twist[1], desired_twist[2], desired_twist[3], desired_twist[4], desired_twist[5], physicsClientId)
             self.solve_steps = self.solve_steps + 1
             # print("self.force_error_z : ", self.force_error_z)
@@ -1434,10 +1437,16 @@ class UR5Env:
             self.writer.add_scalars("joint_positions",
                                    {"joint_positions": joint_positions}, self.solve_steps)
             # if (self.rz < 5e-6 and self.dz < 5e-6) or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
-            if (abs(self.rz) < 5e-2 and abs(self.deta_dz) < 5e-8) or self.insert_depth > 0.435 or self.solve_steps > 3000:
-            # if (abs(self.rz) < 5e-6):
-                print("force err success")
-                break
+            if if_test == True:
+                if (abs(self.rz) < 5e-2 and abs(self.deta_dz) < 5e-8) or self.insert_depth > 0.435 or self.solve_steps > 3000:
+                # if (abs(self.rz) < 5e-6):
+                    print("force err success")
+                    break
+            else:
+                if (abs(self.rz_tmp) < 5e-3) or self.insert_depth > 0.435 or self.solve_steps > 1000:
+                    # if (abs(self.rz) < 5e-6):
+                    print("force err success")
+                    break
 
     def quaternion_to_euler(self, q1, q2):
         # 将四元数转换为欧拉角(ZYX顺序)
