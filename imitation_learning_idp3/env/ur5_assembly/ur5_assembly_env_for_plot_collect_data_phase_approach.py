@@ -29,6 +29,7 @@ import sys
 from spatialmath import SE3
 import spatialmath as sm
 from scipy.spatial.transform import Rotation
+from numpy.ma.core import argmin
 sys.path.append('../../../imitation_learning_idp3')
 from imitation_learning_idp3.arm.motion_planning import LinePositionParameter, OneAttitudeParameter, CartesianParameter, \
     QuinticVelocityParameter, TrajectoryParameter, TrajectoryPlanner
@@ -171,6 +172,16 @@ def _6d_to_quaternion(sixd: np.ndarray) -> np.ndarray:
     full_matrix = np.concatenate([rot_matrix, r3[..., None]], axis=-1)
     return Rotation.from_matrix(full_matrix).as_quat()
 
+def draw_coordinate_frame(pos, orn, axis_length, lifetime):
+    rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+    axes = [
+        (pos, pos + rot_matrix[:, 0] * axis_length, [1, 0, 0]),  # X
+        (pos, pos + rot_matrix[:, 1] * axis_length, [0, 1, 0]),  # Y
+        (pos, pos + rot_matrix[:, 2] * axis_length, [0, 0, 1])   # Z
+    ]
+    for start, end, color in axes:
+        p.addUserDebugLine(start, end, color, lineWidth=1, lifeTime=lifetime)
+
 class DebugAxes(object):
     """
     可视化某个局部坐标系, 红色x轴, 绿色y轴, 蓝色z轴
@@ -248,8 +259,9 @@ class UR5Env:
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态
         # self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.050115573329094,
         #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,接触桌面
-        self.init_joint_val =[-0.50195291679571792, -1.2151152721500111, -2.042115573329094, # 0.10195291679571792
-                              -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,不接触桌面
+        init_end_orien = np.random.uniform(-0.5, 0.5)
+        self.init_joint_val =[0.21195291679571792, -1.2151152721500111, -2.102115573329094, # 0.10195291679571792
+                              -1.4251581329978485, 1.5707963241241731, 0.17195291700664328+init_end_orien]#标准垂直姿态,不接触桌面
         # 插孔是否失败阈值
         self.ftmax = [200, 100]
         self.threshold = [150, 100]
@@ -303,14 +315,13 @@ class UR5Env:
         # 添加pybullet的额外数据地址，使程序可以直接调用到内部的一些模型
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
-        self.tool_id = p.loadSDF( "/home/zhou/autolab/peg-in-hole/888/file_recv/model/fangkuai/model.sdf")
+        self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
-                         lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
+                         lateralFriction=0.1, spinningFriction=0.1, rollingFriction=0, frictionAnchor=True)
 
-        #  直的
-        p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32 + 0.08],
-                                          p.getQuaternionFromEuler([(3.145926 / 2), 0, 0]))#100宽度*100高*孔21
+        p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32],
+                                          p.getQuaternionFromEuler([0, 0, 0]))#100宽度*100高*孔21
         self.init_height = 0.32+0.08
         self.goalPosition =[-0.4+0.05, 0.1-0.05, 0.32+0.08]
 
@@ -319,11 +330,12 @@ class UR5Env:
 
         # 添加机器人模型
         self.ur5_id = p.loadURDF(
-            "./assert/ur_description/urdf/ur5_robot_sensor_pos2_stand_eelink.urdf",
+            "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
             basePosition=[0, 0, 0.1], flags=9)
         self.ur5_id_plan = p.loadURDF(
-            "./assert/ur_description/urdf/ur5_robot_sensor_pos2_stand_eelink.urdf",
+            "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
             basePosition=[0, 0, 0.1], flags=9, physicsClientId = self.physicsClient_plan)
+        p.changeVisualShape(self.ur5_id, 8, rgbaColor=[0.1, 0.1, 0.1, 0.3])
         self.ur5EndEffectorIndex = 7
         self.numdof = 6
         self.numjoint = p.getNumJoints(self.ur5_id)
@@ -408,15 +420,42 @@ class UR5Env:
     def reset(self):
         self.goal_cont=0
         self.randm_num += 1
+        self.solve_steps = 0
         self.int_falg = True
         self.mointor_force_torque = np.zeros((2, 60))
         p.enableJointForceTorqueSensor(self.ur5_id, 7)
         p.stepSimulation()
 
         # --------------------------------------- 重置关节至初始状态------------------------------------这里有坑，p.resetJointState与p.setTimeStep()会导致初始姿态偏移
+        init_end_orien = np.random.uniform(-1, 1)
+        init_joint0_orien = np.random.uniform(-0.1, 0.1)
+        self.init_joint_val[5] += init_end_orien
+        # self.init_joint_val[0] += init_joint0_orien
         for i in range(6):
             p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.init_joint_val[i])
             p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.init_joint_val[i], physicsClientId=self.physicsClient_plan)
+
+        self.hole_up_end = np.zeros(3)
+        self.hole_up_end[0] = self.obj_t[0] - 0.0016
+        self.hole_up_end[1] = self.obj_t[1] - 0.027
+        self.hole_up_end[2] = self.obj_t[2] + 0.11
+
+        self.init_pose = np.zeros(3)
+        self.init_pose[0] = self.obj_t[0] + 0.0516
+        self.init_pose[1] = self.obj_t[1] - 0.077
+        self.init_pose[2] = self.obj_t[2] + 0.16
+        current_orie = p.getLinkState(self.ur5_id, 7)[5]
+        self.target_joint_angles = p.calculateInverseKinematics(
+            bodyUniqueId=self.ur5_id,
+            endEffectorLinkIndex=7,
+            targetPosition=self.init_pose,
+            targetOrientation=current_orie,
+            jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+            physicsClientId=self.physicsClient_use)
+        for i in range(6):
+            p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.target_joint_angles[i])
+            p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.target_joint_angles[i], physicsClientId=self.physicsClient_plan)
+
 
         self.zero_Position = np.zeros(3)
         self.zero_Orientation = np.zeros(4)
@@ -424,9 +463,12 @@ class UR5Env:
         # 定义平移
         current_pos = p.getLinkState(self.ur5_id, 7)[4]
         current_orie = p.getLinkState(self.ur5_id, 7)[5]
+        current_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
+        self.prev_pos = current_peg_pos
+        self.trail_duration = 6000
         #打印出效果用
         self.inint_orie_print =current_orie
-        self.goalPosition_eelink.update(current_pos,current_orie)
+        # self.goalPosition_eelink.update(current_pos,current_orie)
         random.seed(self.randm_num)
         theta = random.uniform(0, 2*math.pi)
         deltaR = random.uniform(0.0000, 0.0003)
@@ -466,7 +508,7 @@ class UR5Env:
 
         # 计算当前深度
         po = p.getLinkState(self.ur5_id, 7)
-        end_ = self.Visualize_rotation_center(po[4], po[5], relative_offset=[0.055, 0, 0], UI=True)[0]
+        end_ = self.Visualize_rotation_center(po[4], po[5], relative_offset=[0.055, 0, 0], UI=False)[0]
 
         # now_distance = np.sqrt(np.sum(np.square(end_[0:2] - self.goalPosition[0:2])))
         # print("初始化距离： ",now_distance)
@@ -490,6 +532,8 @@ class UR5Env:
 
         end_peg_matrix = np.eye(4)
         end_peg_matrix[:3, :3] = R.from_quat(peg_orientation).as_matrix()
+        # hole_euler = R.from_quat(peg_orientation).as_euler('xyz',degrees=True)
+        # end_peg_matrix[:3, :3] = Rotation.from_euler('xyz', hole_euler).as_matrix()
         end_peg_matrix[:3, 3] = peg_position
 
         T0 = SE3(end_peg_matrix)
@@ -499,32 +543,27 @@ class UR5Env:
         R1 = R0.copy()
         planner0 = self.cal_planner(t0, R0, t1, R1, time0)
 
-        hole_matrix = np.eye(4)
-        # hole_matrix[:3, :3] = R.from_quat(self.obj_r).as_matrix()
-        hole_matrix[:3, :3] =  R.from_euler('xyz', [90, 90, -90], degrees=True).as_matrix()
-        hole_matrix[0, 3] = self.obj_t[0]
-        hole_matrix[1, 3] = self.obj_t[1]
-        hole_matrix[2, 3] = self.obj_t[2] + 0.08
-        T2 = SE3(hole_matrix)
-
         time1 = 8.0
+
+        end_peg_matrix1 = np.eye(4)
+        robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        state_orientation = robot_state_position[1]
+        end_peg_matrix1[:3, :3] = R.from_quat(state_orientation).as_matrix()
+        end_peg_matrix1[:3, 3] = self.hole_up_end
+
+        T2 = SE3(end_peg_matrix1)
         t2 = T2.t
         R2 = sm.SO3(T2.R)
         planner1 = self.cal_planner(t1, R1, t2, R2, time1)
 
-        time2 = 1.0
+        time3 = 2.5
         t3 = t2.copy()
-        t3[2] = t2[2] - 0.01
+        # t3[2] -= 0.007
         R3 = R2.copy()
-        planner2 = self.cal_planner(t2, R2, t3, R3, time2)
+        planner3 = self.cal_planner(t2, R2, t3, R3, time3)
 
-        time3 = 0.5
-        t4 = t3.copy()
-        R4 = R3.copy()
-        planner3 = self.cal_planner(t3, R3, t4, R4, time3)
-
-        time_array = np.array([0, time0, time1, time2, time3])
-        planner_array = [planner0, planner1, planner2, planner3]
+        time_array = np.array([0, time0, time1, time3])
+        planner_array = [planner0, planner1, planner3]
         total_time = np.sum(time_array)
 
         time_step_num = round(total_time * self._timeStep) + 1
@@ -626,6 +665,21 @@ class UR5Env:
             self.control_joints_to_target(self.ur5_id, desired_poses[time_num, :], self.control_joint_ids,
                                           physicsClientId=self.physicsClient_use)
 
+            """ draw contact phase result """
+            cur_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
+            cur_peg_orie = p.getLinkState(self.ur5_id, 8)[5]
+            if self.prev_pos is not None:
+                # 绘制线段连接当前位置和上一个位置
+                p.addUserDebugLine(self.prev_pos, cur_peg_pos,
+                                   lineColorRGB=[0.0, 1.0, 1.0],  # 红色
+                                   lineWidth=4,
+                                   lifeTime=self.trail_duration)
+
+            self.prev_pos = cur_peg_pos
+            # 关键帧绘制坐标系
+            if time_num % 100 == 0:
+                draw_coordinate_frame(cur_peg_pos, cur_peg_orie, axis_length=0.01, lifetime=0)
+            """ draw contact phase result """
             time_until_next_step = 1/self._timeStep - (time.time() - step_start)
             if time_until_next_step > 0:
                 time.sleep(time_until_next_step)
@@ -764,7 +818,7 @@ class UR5Env:
     def get_observation(self):
         self.camera_Position = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[0]
         self.camera_Orientation = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[1]
-        self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
+        # self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
         self.cube_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
         self.camera_in_world = [-0.6, 0.2, 0.7]
         self.view_matrix = p.computeViewMatrix(cameraEyePosition = [self.camera_in_world[0],
