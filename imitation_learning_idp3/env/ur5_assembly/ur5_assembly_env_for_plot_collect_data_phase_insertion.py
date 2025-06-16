@@ -277,6 +277,7 @@ class UR5Env:
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
         self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
+        p.changeVisualShape(self.tool_id[0], -1, rgbaColor=[0.95, 0.95, 0.95, 0.95])
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
                          lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
@@ -399,7 +400,7 @@ class UR5Env:
         self.hole_up_end = np.zeros(3)
         self.hole_up_end[0] = self.obj_t[0] - 0.0016
         self.hole_up_end[1] = self.obj_t[1] - 0.027
-        self.hole_up_end[2] = self.obj_t[2] + 0.11
+        self.hole_up_end[2] = self.obj_t[2] + 0.115
 
         current_orie = p.getLinkState(self.ur5_id, 7)[5]
         self.target_joint_angles = p.calculateInverseKinematics(
@@ -421,7 +422,7 @@ class UR5Env:
         current_pos = p.getLinkState(self.ur5_id, 7)[4]
         current_orie = p.getLinkState(self.ur5_id, 7)[5]
         current_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
-        self.prev_pos = current_peg_pos
+        self.prev_pos = None
         self.trail_duration = 6000
         #打印出效果用
         self.inint_pose_print =current_pos
@@ -682,6 +683,24 @@ class UR5Env:
             #                               physicsClientId=self.physicsClient_use)
             self.control_jointsArray_to_target(self.ur5_id, list(desired_poses[time_num, :]),
                                                self.control_joint_ids, physicsClientId=self.physicsClient_use)
+            """ draw contact phase result """
+            if time_num > record_time_num:
+                cur_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
+                cur_peg_orie = p.getLinkState(self.ur5_id, 8)[5]
+                if self.prev_pos is not None:
+                    # 绘制线段连接当前位置和上一个位置
+                    p.addUserDebugLine(self.prev_pos, cur_peg_pos,
+                                       lineColorRGB=[0.0, 1.0, 1.0],  # 红色
+                                       lineWidth=4,
+                                       lifeTime=self.trail_duration)
+                else:
+                    self.prev_pos = cur_peg_pos
+
+                self.prev_pos = cur_peg_pos
+                # 关键帧绘制坐标系
+                if time_num % 2 == 0:
+                    self.draw_coordinate_frame(cur_peg_pos, cur_peg_orie, axis_length=0.01, lifetime=0)
+            """ draw contact phase result """
             time_until_next_step = 1/self._timeStep - (time.time() - step_start)
             if time_until_next_step > 0:
                 time.sleep(time_until_next_step)
@@ -1002,7 +1021,7 @@ class UR5Env:
     def get_observation(self):
         self.camera_Position = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[0]
         self.camera_Orientation = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[1]
-        self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
+        # self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
         self.cube_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
         self.camera_in_world = [-0.6, 0.2, 0.7]
         self.view_matrix = p.computeViewMatrix(cameraEyePosition = [self.camera_in_world[0],
@@ -1167,3 +1186,13 @@ class UR5Env:
             self.Visualize_rotation_center_UI.update(peg_link_pos, peg_link_Quaternion)
 
         return [peg_link_pos, peg_link_Quaternion]
+
+    def draw_coordinate_frame(self, pos, orn, axis_length, lifetime):
+        rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+        axes = [
+            (pos, pos + rot_matrix[:, 0] * axis_length, [1, 0, 0]),  # X
+            (pos, pos + rot_matrix[:, 1] * axis_length, [0, 1, 0]),  # Y
+            (pos, pos + rot_matrix[:, 2] * axis_length, [0, 0, 1])  # Z
+        ]
+        for start, end, color in axes:
+            p.addUserDebugLine(start, end, color, lineWidth=1, lifeTime=lifetime)

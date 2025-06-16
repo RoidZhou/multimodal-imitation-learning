@@ -66,7 +66,9 @@ def main(cfg: OmegaConf):
     hole_pose = np.array(env.inint_pose_print)
     # 移动到初始位姿
     env.go(list(hole_pose), desired_r)
-
+    FT = env.getForceTorque()
+    Fext = [FT[0], FT[1], FT[2]]
+    print("force : ", Fext)
     # 移动到初始插接位姿
     hole_pose[2] = hole_pose[2] - 0.015  # 孔深度0.08
     env.go(hole_pose, desired_r)
@@ -120,6 +122,23 @@ def main(cfg: OmegaConf):
             time.sleep(time_until_next_step)
         robot_state_position = p.getLinkState(env.ur5_id, env.ur5EndEffectorIndex, computeForwardKinematics=1)
         curr_pose = robot_state_position[0]
+        """ draw contact phase result """
+        cur_peg_pos = p.getLinkState(env.ur5_id, 8)[4]
+        cur_peg_orie = p.getLinkState(env.ur5_id, 8)[5]
+        if env.prev_pos is not None:
+            # 绘制线段连接当前位置和上一个位置
+            p.addUserDebugLine(env.prev_pos, cur_peg_pos,
+                               lineColorRGB=[0.0, 1.0, 1.0],  # 红色
+                               lineWidth=4,
+                               lifeTime=env.trail_duration)
+        else:
+            env.prev_pos = cur_peg_pos
+
+        env.prev_pos = cur_peg_pos
+        # 关键帧绘制坐标系
+        if step_num % 2 == 0:
+            env.draw_coordinate_frame(cur_peg_pos, cur_peg_orie, axis_length=0.01, lifetime=0)
+        """ draw contact phase result """
         if curr_pose[2] < 0.398:
             done = True
     p.disconnect()
