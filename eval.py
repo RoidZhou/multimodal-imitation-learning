@@ -15,6 +15,7 @@ from omegaconf import OmegaConf
 import hydra
 import pybullet as p
 from scipy.spatial.transform import Rotation as R
+from numpy.ma.core import argmin
 
 sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode='w', buffering=1)
@@ -45,24 +46,35 @@ def main(cfg: OmegaConf):
 
     obs = env.reset()
     # 初始化参数
-    target_angles = np.array([90, 90, -90])  # 目标姿态
-    hole_position = p.getBasePositionAndOrientation(env.tool_id[0])[0]
-    hole_pose = np.array(hole_position)
-    hole_pose[2] += 0.06
+    angles = []
+    angles_select = [-150, -30, 90, 210]
+    for i in range(4):
+        hole_orientation = R.from_euler('xyz', [90, 90, -150 + 120 * i], degrees=True).as_quat()  # 默认固定孔的姿态
 
-    hole_orientation = R.from_euler('xyz', [90, 90, -90], degrees=True).as_quat()  # 默认固定孔的姿态
-    hole_orie = np.array(hole_orientation)
+        robot_state_position = p.getLinkState(env.ur5_id, env.ur5EndEffectorIndex, computeForwardKinematics=1)
+        state_orientation = robot_state_position[1]
+        orientation_err = np.dot(hole_orientation, state_orientation)
+        orien_angle_err = 2 * np.arccos(orientation_err)
+        angle_err = orien_angle_err * 180 / np.pi
+        angles.append(angle_err)
+    angle_target = angles_select[argmin(angles)]
+    hole_orientation = R.from_euler('xyz', [90, 90, angle_target], degrees=True).as_quat()  # 默认固定孔的姿态
+
+    peg_orientation = np.array(hole_orientation)
+
+    desired_r = [-0.61237244, 0.35355339, 0.61237244, 0.35355339]
+    hole_pose = np.array(env.inint_pose_print)
     # 移动到初始位姿
-    env.go(hole_pose, hole_orie)
+    env.go(list(hole_pose), desired_r)
 
     # 移动到初始插接位姿
     hole_pose[2] = hole_pose[2] - 0.015  # 孔深度0.08
-    env.go(hole_pose, hole_orie)
+    env.go(hole_pose, desired_r)
 
     init_x_angle_err= np.random.uniform(-5, 5)
     init_y_angle_err= np.random.uniform(-5, 5)
 
-    hole_orientation = R.from_euler('xyz', [90+init_x_angle_err, 90+init_y_angle_err, -90], degrees=True).as_quat()  # 默认固定孔的姿态
+    hole_orientation = R.from_euler('xyz', [90+init_x_angle_err, 90+init_y_angle_err, angle_target], degrees=True).as_quat()  # 默认固定孔的姿态
     hole_orie = np.array(hole_orientation)
     # 移动到初始位姿
     env.go(hole_pose, hole_orie)
@@ -106,7 +118,10 @@ def main(cfg: OmegaConf):
         time_until_next_step = 1/env._timeStep - (time.time() - step_start)
         if time_until_next_step > 0:
             time.sleep(time_until_next_step)
-
+        robot_state_position = p.getLinkState(env.ur5_id, env.ur5EndEffectorIndex, computeForwardKinematics=1)
+        curr_pose = robot_state_position[0]
+        if curr_pose[2] < 0.398:
+            done = True
     p.disconnect()
 
 

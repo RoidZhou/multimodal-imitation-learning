@@ -50,7 +50,7 @@ def main(cfg: OmegaConf):
 
     for i in range(num):
         env.reset()
-        data = env.collect_force_dataset_delta_orien_improv(20)
+        data = env.run()
         if i == 0:
             states = data['states']
             actions = data['actions']
@@ -59,7 +59,7 @@ def main(cfg: OmegaConf):
             actions = np.vstack((actions, data['actions']))
         episode_ends.append(states.shape[0])
 
-    filename = './data/ur5_assembly/ur5_assembly_force.zarr'
+    filename = './data/ur5_assembly/ur5_assembly_force_new.zarr'
     write_zarr(filename, states, actions, episode_ends)
 
 

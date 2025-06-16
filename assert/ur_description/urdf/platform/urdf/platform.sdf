@@ -1,0 +1,38 @@
+<sdf version='1.7'>
+  <model name='platform'>
+    <link name='base_link'>
+      <inertial>
+        <pose>0.001633 0.027078 0 0 -0 0</pose>
+        <mass>0.411257</mass>
+        <inertia>
+          <ixx>0.000368805</ixx>
+          <ixy>-3.64122e-06</ixy>
+          <ixz>1.29127e-18</ixz>
+          <iyy>0.000710408</iyy>
+          <iyz>-4.25569e-18</iyz>
+          <izz>0.000621391</izz>
+        </inertia>
+      </inertial>
+      <collision concave='yes' name='base_link_collision'>
+        <pose>0 0 0 0 -0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>/home/zhou/autolab/imitation_learning_idp3/assert/ur_description/urdf/platform/meshes/base_link.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+      <visual name='base_link_visual'>
+        <pose>0 0 0 0 -0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>/home/zhou/autolab/imitation_learning_idp3/assert/ur_description/urdf/platform/meshes/base_link.STL</uri>
+          </mesh>
+        </geometry>
+      </visual>
+    </link>
+    <static>1</static>
+    <allow_auto_disable>1</allow_auto_disable>
+  </model>
+</sdf>
