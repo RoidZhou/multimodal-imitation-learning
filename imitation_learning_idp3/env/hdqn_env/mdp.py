@@ -231,7 +231,6 @@ class UR5Env:
         self.action_dim = cfg.action.shape[0]
 
         self.randm_num = 1
-        self.writer = SummaryWriter('./paperforceslog2')
         self.mointor_force_torque = np.zeros((2, 60))
         self.neibu = False
         self.sucessful_number = 0 # 迭代成功的次数
@@ -271,7 +270,7 @@ class UR5Env:
         self.image_height = 240
 
         # 机械臂实际执行频率，ur5真实通讯频率是120hz
-        self._timeStep = 100
+        self._timeStep = 240
         self.t = (1 / self._timeStep)*2
         self.T0 = sm.SE3()
 
@@ -330,7 +329,7 @@ class UR5Env:
         ##  第一步，连接仿真环境
         self.is_render = render
         if self.is_render:
-            self.physicsClient_use = p.connect(p.DIRECT)
+            self.physicsClient_use = p.connect(p.GUI)
             self.physicsClient_plan = p.connect(p.DIRECT)
         else:
             p.connect(p.DIRECT)
@@ -367,6 +366,12 @@ class UR5Env:
             "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
             basePosition=[0, 0, 0.1], flags=9, physicsClientId = self.physicsClient_plan)
         self.ur5EndEffectorIndex = 7
+        contact_stiffness = 500  # 较低刚度，柔软接触
+        contact_damping = 100  # 适中阻尼
+
+        self.set_link_stiffness(self.ur5_id, self.ur5EndEffectorIndex, contact_stiffness, contact_damping,
+                                self.physicsClient_use)
+
         self.numdof = 6
         self.numjoint = p.getNumJoints(self.ur5_id)
         for j in range(p.getNumJoints(self.ur5_id)):
@@ -423,8 +428,8 @@ class UR5Env:
         self.In_M = 0.1 # M = 10， inverse_M = 1/M 
         self.translational_stiffness = 10
         self.rotational_stiffness = 10
-        self.translational_damping = 40
-        self.translational_damping = 50
+        self.translational_damping = 400
+        self.translational_damping = 400
 
         self.Inverse_M = np.mat(self.In_M * np.eye(6))
 
@@ -477,7 +482,7 @@ class UR5Env:
         self.hole_up_end = np.zeros(3)
         self.hole_up_end[0] = self.obj_t[0] - 0.0016
         self.hole_up_end[1] = self.obj_t[1] - 0.027
-        self.hole_up_end[2] = self.obj_t[2] + 0.11
+        self.hole_up_end[2] = self.obj_t[2] + 0.115
         self.target_joint_angles = p.calculateInverseKinematics(
             bodyUniqueId=self.ur5_id,
             endEffectorLinkIndex=7,
@@ -770,6 +775,25 @@ class UR5Env:
         # self.prev_angle_err = curr_angle_err
 
         return observation, reward, done, info
+
+    def set_link_stiffness(self, robot_id, link_index, contact_stiffness, contact_damping, physics_client_id):
+        """
+        设置机器人 link 的接触刚度和阻尼。
+
+        参数:
+            robot_id: 机器人 ID
+            link_index: link 索引（例如末端执行器的索引）
+            contact_stiffness: 接触刚度 (N/m)
+            contact_damping: 接触阻尼 (N·s/m)
+            physics_client_id: 物理客户端 ID
+        """
+        p.changeDynamics(
+            bodyUniqueId=robot_id,
+            linkIndex=link_index,
+            contactStiffness=contact_stiffness,
+            contactDamping=contact_damping,
+            physicsClientId=physics_client_id
+        )
 
     def shift_array(self, arr):
         if len(arr) <= 1:
@@ -1109,7 +1133,41 @@ class UR5Env:
 
         return [peg_link_pos, peg_link_Quaternion]
 
-    def impedance_controller(self, action, physicsClientId):
+    def cart_to_base_force_torque(self, xyz_force, xyz_torque, position, orientation):
+        """
+        将末端坐标系下的六维力转换到基坐标系。
+
+        参数：
+            xyz_force: 末端坐标系下的力 (3x1 矩阵)。
+            xyz_torque: 末端坐标系下的力矩 (3x1 矩阵)。
+            orientation: 末端坐标系的姿态（四元数或欧拉角）。
+            position: 末端坐标系的位置 (3x1 向量)。
+
+        返回：
+            force_torque_base: 基坐标系下的六维力 (6x1 矩阵)。
+        """
+        import numpy as np
+        from scipy.spatial.transform import Rotation as R
+
+        # 将姿态转换为旋转矩阵
+        if len(orientation) == 4:  # 四元数
+            rotation = R.from_quat(orientation)
+        else:  # 欧拉角
+            rotation = R.from_euler('xyz', orientation, degrees=False)
+        rotation_matrix = rotation.as_matrix()
+
+        # 转换力
+        force_base = rotation_matrix @ xyz_force
+
+        # 转换力矩
+        r = np.array(position)
+        torque_base = rotation_matrix @ xyz_torque
+
+        # 组合结果
+        force_torque_base = np.vstack((force_base, torque_base))
+        return force_torque_base
+
+    def impedance_controller(self, action, physicsClientId, if_test):
         """
         z方向使用力控制
         x,y方向使用导纳控制
@@ -1121,20 +1179,31 @@ class UR5Env:
         action_to_target_pose = [None] * 3
         action_to_target_orie = [None] * 4
         action_to_current = [None] * 3
-        desired_force_z = 0.1  # N
+        desired_force_z = -1  # N
         desired_force_xy = 0.0  # N
         desired_force_rz = 0.0
-        Kp_force = 5  # 比例增益
-        Ki_force = 2  # 积分增益
+        Kp_force = 0.1  # 比例增益
+        Ki_force = 0.02  # 积分增益
         Kd_force = 0.01  # 微分增益
         integral_force_error_z = 0.0
         previous_force_error_z = 0.0
-        delta_z_max = 2
+        delta_z_max = 20
         # 获取当前的关节力和力矩
         FT = self.getForceTorque()
         Fext = [FT[0], FT[1], FT[2]]
         Text = [FT[3], FT[4], FT[5]]
         # Text = [0, 0, 0]
+        # 获取当前的关节状态
+        self.current_Position = p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[4]
+        self.current_Orientation = np.array(p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[5])
+        force_torque_base = self.cart_to_base_force_torque(np.array(Fext), np.array(Text), self.current_Position, self.current_Orientation)
+        self.force_x = force_torque_base[0][0]
+        self.force_y = force_torque_base[0][1]
+        self.force_z = force_torque_base[0][2]
+
+        self.Torque_x = force_torque_base[1][0]
+        self.Torque_y = force_torque_base[1][1]
+        self.Torque_z = force_torque_base[1][2]
 
         action_to_target_pose[0] = action[0] + self.zero_Position[0]
         action_to_target_pose[1] = action[1] + self.zero_Position[1]
@@ -1145,10 +1214,11 @@ class UR5Env:
         action_to_target_orie[2] = action[5]
         action_to_target_orie[3] = action[6]
 
-        wrench_z = Fext[2]
-        # print("wrench_z : ", wrench_z)
-
-        self.force_error_z = wrench_z - desired_force_z
+        wrench_z = force_torque_base[0][2]
+        print("force_torque_base : ", force_torque_base)
+        if abs(self.force_z) > 1:
+            print("force_z")
+        self.force_error_z = desired_force_z - wrench_z
         self.force_y = Fext[1]
 
         integral_force_error_z += self.force_error_z * self.duration
@@ -1164,20 +1234,22 @@ class UR5Env:
         #  Kd_force * derivative_force_error_z
         force_z_adjustment = force_control_output_z
         pos_z_adjustment = max(min(force_z_adjustment, delta_z_max), -delta_z_max)
-        pos_z_adjustment_compensate = pos_z_adjustment / 100  # 手动补偿
+        pos_z_adjustment = pos_z_adjustment / 10  # 手动补偿
         if wrench_z > 0.1:
-            print("wrench_z : ", wrench_z)
-            pos_z_adjustment_compensate = pos_z_adjustment_compensate
+            # print("wrench_z : ", wrench_z)
+            pos_z_adjustment = pos_z_adjustment
         for i in range(1):
-            if Fext[1] > 0.1 or Text[2] > 0.001 :
-                desired_force_rz = -0.1
-                desired_force_xy = -0.1
-            force_external = np.mat([[Fext[0] - desired_force_xy], [Fext[1] - desired_force_xy], [0.0], [Text[0] - desired_force_rz], [Text[1] - desired_force_rz], [Text[2] - desired_force_rz]])
+            # if Fext[1] > 0.1 or Text[2] > 0.001 :
+            #     desired_force_rz = -0.1
+            #     desired_force_xy = -0.1
+            force_torque_base[0][:] = [x if abs(x)>=0.1 else 0.0 for x in force_torque_base[0][:]]
+            force_torque_base[1][:] = [x if abs(x)>=0.1 else 0.0 for x in force_torque_base[1][:]]
+            force_external = np.mat([[force_torque_base[0][0] - desired_force_xy], [force_torque_base[0][1] - desired_force_xy], [0.0], [force_torque_base[1][0] - desired_force_rz], [force_torque_base[1][1] - desired_force_rz], [force_torque_base[1][2] - desired_force_rz]])
             # force_external = np.mat([[0], [Fext[1]], [0], [0], [0], [0]])
 
             # 获取当前的关节状态
-            self.current_Position = p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[4]
-            self.current_Orientation = np.array(p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[5])
+            # self.current_Position = p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[4]
+            # self.current_Orientation = np.array(p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[5])
             action_to_current[0] = self.current_Position[0] - action_to_target_pose[0]  # 计算当前位置与目标位置的差值
             action_to_current[1] = self.current_Position[1] - action_to_target_pose[1]
             action_to_current[2] = self.current_Position[2] - action_to_target_pose[2]
@@ -1194,25 +1266,10 @@ class UR5Env:
             quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
 
             quat_rot_err_ = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
-            # quat_rot_err_tmp = quat_rot_err_ / 1 # for test, is related to the size of target pose that is input
-
-            if quat_rot_err_[2] > np.pi/3:
-                self.orien_failed = 1
-                temp_rz_err = quat_rot_err_[2] * 180 / np.pi
-                angles = []
-                angles_select = [-150, -30, 90, 120, 210]
-                for i in range(4):
-                    hole_orientation = Rotation.from_euler('xyz', [90, 90, -150 + 120 * i],
-                                                           degrees=True).as_quat()  # 默认固定孔的姿态
-
-                    orientation_err = np.dot(hole_orientation, self.current_Orientation)
-                    orien_angle_err = 2 * np.arccos(orientation_err)
-                    angle_err = orien_angle_err * 180 / np.pi
-                    angles.append(angle_err)
-                angle_target = -min(angles)
-                quat_rot_err_[2] = (180 - res[2]) * np.pi / 180
-                print("over pi/3")
-            quat_rot_err_tmp = quat_rot_err_ * 60
+            if if_test == True:
+                quat_rot_err_tmp = quat_rot_err_ / 1 # for test, is related to the size of target pose that is input
+            else:
+                quat_rot_err_tmp = quat_rot_err_ / 1
             self.rz_tmp = quat_rot_err_[2]
             # quat_rot_err_tmp = quat_rot_err_tmp * 180 / np.pi
             # print("quat_rot_err_tmp: ", quat_rot_err_tmp)
@@ -1225,6 +1282,18 @@ class UR5Env:
                 self.pre_dz = self.current_Position[2]
             self.insert_depth += self.deta_dz
             # Position error
+            if abs(action_to_current[0]) < 1e-4:
+                action_to_current[0] = 0.0
+            if abs(action_to_current[1]) < 1e-4:
+                action_to_current[1] = 0.0
+            if abs(action_to_current[2]) < 1e-4:
+                action_to_current[2] = 0.0
+            if abs(quat_rot_err_[0]) < 1e-2:
+                quat_rot_err_tmp[0] = 0.0
+            if abs(quat_rot_err_[1]) < 1e-2:
+                quat_rot_err_tmp[1] = 0.0
+            if abs(quat_rot_err_[2]) < 1e-2:
+                quat_rot_err_tmp[2] = 0.0
             self.dx = action_to_current[0] * 100.0
             self.dy = action_to_current[1] * 100.0
             self.dz = action_to_current[2] * 100.0
@@ -1268,6 +1337,7 @@ class UR5Env:
         self.insert_depth = 0.0
         self.solve_steps = 0
         self.orien_failed = 0
+        self.solve_steps = 0
 
     def apply_hybrid_controller(self, action, physicsClientId, if_test=False):
         """ Make a step in simulation """
@@ -1279,14 +1349,14 @@ class UR5Env:
         self.rotational_stiffness = 40
         self.translational_damping = 28.28
         self.translational_damping = 28.28
-        self.duration = 0.001
+        self.duration = 0.002
         self.zero_Orientation[0] = action[3]
         self.zero_Orientation[1] = action[4]
         self.zero_Orientation[2] = action[5]
         self.zero_Orientation[3] = action[6]
         self.reset_controller()
         while 1:
-            desired_twist, deta_desired_twist = self.impedance_controller(action, physicsClientId)
+            desired_twist, deta_desired_twist = self.impedance_controller(action, physicsClientId, if_test=False)
             desired_twist = np.array(desired_twist)
             print("desired_twist: ", desired_twist)
             self.send_commands_to_robot(desired_twist[0], desired_twist[1], desired_twist[2], desired_twist[3], desired_twist[4], desired_twist[5], physicsClientId)
@@ -1297,14 +1367,18 @@ class UR5Env:
             # print("self.force_error_z : ", self.force_error_z)
             joint_positions = p.getJointState(self.ur5_id, 6, physicsClientId=physicsClientId)[0]
             # print("self.position_error_y : ", self.position_error_y)
-            self.writer.add_scalars("force_error_z",
-                                   {"force_error_z": self.force_error_z}, self.solve_steps)
-            self.writer.add_scalars("rz",
-                                   {"rz": self.rz}, self.solve_steps)
+            self.writer.add_scalars("force_x",
+                                   {"force_x": self.force_x}, self.solve_steps)
             self.writer.add_scalars("force_y",
                                    {"force_y": self.force_y}, self.solve_steps)
-            self.writer.add_scalars("joint_positions",
-                                   {"joint_positions": joint_positions}, self.solve_steps)
+            self.writer.add_scalars("force_z",
+                                   {"force_z": self.force_z}, self.solve_steps)
+            self.writer.add_scalars("Torque_x",
+                                   {"Torque_x": self.Torque_x}, self.solve_steps)
+            self.writer.add_scalars("Torque_y",
+                                   {"Torque_y": self.Torque_y}, self.solve_steps)
+            self.writer.add_scalars("Torque_z",
+                                   {"Torque_z": self.Torque_z}, self.solve_steps)
             # if (self.rz < 5e-6 and self.dz < 5e-6) or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
             if if_test == True:
                 if (abs(self.rz) < 5e-2 and abs(self.deta_dz) < 5e-8) or self.insert_depth > 0.435 or self.solve_steps > 3000:
@@ -1371,10 +1445,10 @@ class UR5Env:
         joint_velocities = np.linalg.pinv(jacobian) @ cartesian_velocity
         for i, joint_index in enumerate(joint_indices):
             if joint_index == 6:
-                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, velocityGain=0.8, targetVelocity=joint_velocities[i], force=4000, physicsClientId=physicsClientId)
+                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, velocityGain=0.5, targetVelocity=joint_velocities[i], force=500, physicsClientId=physicsClientId)
             else:
-                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=joint_velocities[i], force=1000, physicsClientId=physicsClientId)
+                p.setJointMotorControl2(self.ur5_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=joint_velocities[i], force=100, physicsClientId=physicsClientId)
                 # ----------------------将更新频率设置为真实频率---------------------
         p.setTimeStep(1.0 / self._timeStep)
-        for _ in range(20):
+        for _ in range(10):
             p.stepSimulation()
