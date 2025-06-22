@@ -50,14 +50,12 @@ def main(cfg: OmegaConf):
 
     for i in range(num):
         env.reset()
-        data = env.collect_force_dataset_delta_orien_improv(20)
+        data = env.run()
         if i == 0:
             states = data['states']
             actions = data['actions']
             pose = data['pose']
-            force = data['force']
-            np.save("pose_.npy", pose)
-            np.save("force_.npy", force)
+            np.save("pose2.npy", pose)
         else:
             states = np.vstack((states, data['states']))
             actions = np.vstack((actions, data['actions']))

@@ -65,14 +65,16 @@ def normalize_rotation_matrix(rot_matrix):
     return np.array([axis/np.linalg.norm(axis) for axis in rot_matrix.T]).T
 
 def plot_phase_adjustment(trajectories):
+    labels = ['trajectories', 'roll', 'pitch', 'yaw']
     for idx, data in enumerate(trajectories):
         fixed_position = data[0, 0:3]
+        valid_points = np.where(data[:, 6] != 0.0)[0]
+        data = data[valid_points]
         num_points = len(data)
+
+        # num_points = len(valid_points)
         time = np.linspace(0, 10, num_points)
 
-        # 提取角度（确保yaw对应Z轴）
-        roll, pitch, yaw = data[:, 3], data[:, 4], data[:, 5]
-        yaw = np.zeros(len(yaw))
         # ========== 关键修改开始 ==========
         # 强制yaw旋转优先（Z轴旋转）
         # 方法：使用ZXY旋转顺序，确保yaw首先应用
@@ -91,24 +93,19 @@ def plot_phase_adjustment(trajectories):
         norm = Normalize(vmin=0, vmax=num_points - 1)
 
         for i in range(num_points):
-            if roll[i] == 0.0:
-                roll[:] = 90
-                pitch[:] = 90
             z_pos = total_height - time[i] * height_scale
-            # 计算旋转矩阵（确保yaw对应Z轴）
-            rot = R.from_euler(
-                euler_sequence,
-                [yaw[i], roll[i], pitch[i]],  # 顺序对应euler_sequence
-                degrees=True
-            )
-            rot_matrix = rot.as_matrix()
-            rot_matrix = normalize_rotation_matrix(rot_matrix)
-            # 验证Z轴方向（可选）
-            z_axis = rot_matrix[:, 2]  # 旋转后的Z轴
+            if np.linalg.norm(data[i, 3:7]) == 0.0:
+                continue
+            rot_matrix = R.from_quat(data[i, 3:7]).as_matrix()
+            quat = data[i, 3:7]
+            print(np.linalg.norm(quat))
+            print(np.allclose(rot_matrix.T @ rot_matrix, np.eye(3), atol=1e-6))
+
             # ========== 关键修改结束 ==========
 
             # 绘制坐标系（突出Z轴）
-            for j, (axis, col) in enumerate(zip(rot_matrix.T, ['r', 'g', 'b'])):
+            c = 1
+            for j, (axis, col) in enumerate(zip(rot_matrix.T, ['g', 'r', 'b'])):
                 linewidth = 1 if j == 2 else 1.5  # 加粗Z轴
                 # alpha = 0.8
 
@@ -120,26 +117,34 @@ def plot_phase_adjustment(trajectories):
                     normalize=False,
                     arrow_length_ratio=0.15,
                     linewidth=linewidth,
-                    label=f'Yaw={yaw[i]:.1f}°' if (i % 10 == 0 and j == 2) else ""
+                    label=f'{labels[c]}' if (idx == 0 and i == 0) else ""
                 )
-
+                c += 1
             # 标记关键点
             # if i % 10 == 0:
             #     ax.scatter(0, 0, z_pos, color=cmap(norm(i)), s=20)
 
         # 参考坐标系（灰色）
-        ref_axes = np.eye(3)
-        for axis, col in zip(ref_axes.T, ['0.7', '0.7', '0.7']):
-            ax.quiver(0, 0, total_height, *axis, length=0.3, color=col, alpha=0.5)
+        # ref_axes = np.eye(3)
+        # for axis, col in zip(ref_axes.T, ['0.7', '0.7', '0.7']):
+        #     ax.quiver(0, 0, total_height, *axis, length=0.3, color=col, alpha=0.5)
         # set_3d_axes_equal(ax)
 
         # 图形设置
         ax.set_zlim([0, total_height])
         ax.set_xlim([-1.5, 1.5])
         ax.set_ylim([-1.5, 1.5])
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Steps ↓', rotation=90, labelpad=15)
+
+        ax.set_xlabel('X (m)', labelpad=10, fontsize=14)
+        ax.set_ylabel('Y (m)', labelpad=10, fontsize=14)
+        ax.set_zlabel('Steps ↓', rotation=30, labelpad=15, fontsize=14)
+        ax.view_init(elev=30, azim=45)  # 固定视角
+        ax.tick_params(axis='x', pad=5, labelsize=12)
+        ax.tick_params(axis='y', pad=5, labelsize=12)
+        ax.tick_params(axis='z', pad=5, labelsize=12)
+        ax.xaxis.pane.set_facecolor('none')
+        ax.yaxis.pane.set_facecolor('none')
+        ax.zaxis.pane.set_facecolor('none')
         # ax.set_title(f'Position Adjustment Trajectory on ', fontsize=12)
         ax.view_init(elev=25, azim=-60)
 
@@ -148,7 +153,7 @@ def plot_phase_adjustment(trajectories):
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax, orientation='vertical', pad=0.1)
         cbar.set_label('Steps Progression', labelpad=15)
-
+        ax.legend(fontsize=14)
         plt.tight_layout()
         plt.show()
 
@@ -211,7 +216,7 @@ def plot_collect_data_forces_torques(force_torque, title):
 
 if __name__ == '__main__':
     # 加载所有轨迹文件
-    file_names = ["pose.npy", "pose_.npy"]  # 或.csv
+    file_names = ["pose2.npy"]  # 或.csv
     trajectories = [np.load(f) for f in file_names]  # 如果是.csv，用 np.loadtxt(f, delimiter=',')
 
     # 为每组轨迹设置颜色和标签

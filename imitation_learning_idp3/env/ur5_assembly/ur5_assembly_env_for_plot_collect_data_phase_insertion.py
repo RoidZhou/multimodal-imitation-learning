@@ -175,7 +175,7 @@ class UR5Env:
         self.log =[]
 
         self.randm_num = 1
-        self.writer = SummaryWriter('./paperforceslog2')
+        self.writer = SummaryWriter('./HDQN_peg/collect_data_plot_insertion')
         self.mointor_force_torque = np.zeros((2, 60))
         self.neibu = False
         self.sucessful_number = 0 # 迭代成功的次数
@@ -481,6 +481,40 @@ class UR5Env:
         # 返回初始的观测量
         return self.get_observation()
 
+    def cart_to_base_force_torque(self, xyz_force, xyz_torque, position, orientation):
+        """
+        将末端坐标系下的六维力转换到基坐标系。
+
+        参数：
+            xyz_force: 末端坐标系下的力 (3x1 矩阵)。
+            xyz_torque: 末端坐标系下的力矩 (3x1 矩阵)。
+            orientation: 末端坐标系的姿态（四元数或欧拉角）。
+            position: 末端坐标系的位置 (3x1 向量)。
+
+        返回：
+            force_torque_base: 基坐标系下的六维力 (6x1 矩阵)。
+        """
+        import numpy as np
+        from scipy.spatial.transform import Rotation as R
+
+        # 将姿态转换为旋转矩阵
+        if len(orientation) == 4:  # 四元数
+            rotation = R.from_quat(orientation)
+        else:  # 欧拉角
+            rotation = R.from_euler('xyz', orientation, degrees=False)
+        rotation_matrix = rotation.as_matrix()
+
+        # 转换力
+        force_base = rotation_matrix @ xyz_force
+
+        # 转换力矩
+        r = np.array(position)
+        torque_base = rotation_matrix @ xyz_torque
+
+        # 组合结果
+        force_torque_base = np.vstack((force_base, torque_base))
+        return force_torque_base
+
     def run(self):
         time0 = 0.001
         robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
@@ -587,7 +621,7 @@ class UR5Env:
         point_clouds = np.zeros((every_epoch_num, self.num_points, 6))
         next_states = np.zeros((every_epoch_num, 6)),
         force = np.zeros((every_epoch_num, 6)),
-        pose = np.zeros((every_epoch_num, 6))
+        pose = np.zeros((every_epoch_num, 7))
 
         time_cumsum = np.cumsum(time_array)
         joint_indices = []
@@ -627,6 +661,7 @@ class UR5Env:
 
         data_num = 0
         time_num = 0
+        force_step = 0
         while p.isConnected():
             step_start = time.time()
 
@@ -651,6 +686,30 @@ class UR5Env:
 
                     current_force = np.array([FT[0], FT[1], FT[2]])
                     print(current_force)
+                    Fext = [FT[0], FT[1], FT[2]]
+                    Text = [FT[3], FT[4], FT[5]]
+                    force_torque_base = self.cart_to_base_force_torque(np.array(Fext), np.array(Text),
+                                                                       robot_state_position[0], robot_state_position[1])
+                    self.force_x = Fext[0]
+                    self.force_y = Fext[1]
+                    self.force_z = Fext[2]
+
+                    self.Torque_x = Text[0]
+                    self.Torque_y = Text[1]
+                    self.Torque_z = Text[2]
+                    self.writer.add_scalars("force_x",
+                                            {"force_x": self.force_x}, force_step)
+                    self.writer.add_scalars("force_y",
+                                            {"force_y": self.force_y}, force_step)
+                    self.writer.add_scalars("force_z",
+                                            {"force_z": self.force_z}, force_step)
+                    self.writer.add_scalars("Torque_x",
+                                            {"Torque_x": self.Torque_x}, force_step)
+                    self.writer.add_scalars("Torque_y",
+                                            {"Torque_y": self.Torque_y}, force_step)
+                    self.writer.add_scalars("Torque_z",
+                                            {"Torque_z": self.Torque_z}, force_step)
+                    force_step += 1
                     if max(abs(current_force)) < 1e-3:
                         break
                     current_torque = np.array([FT[3], FT[4], FT[5]])
@@ -673,6 +732,7 @@ class UR5Env:
 
                     states[data_num, ...] = state
                     actions[data_num, ...] = action
+                    pose[data_num, ...] = np.concatenate([joint_state, current_orie])
                 data_num += 1
 
             time_num += 1
@@ -711,6 +771,7 @@ class UR5Env:
             'states': states,
             'actions': actions,
             'point_clouds': point_clouds,
+            'pose': pose
             # 'next_states': next_state,
             # 'force': np.concatenate([current_force, current_torque]),
             # 'pose': np.concatenate([hole_pose, new_angles])
