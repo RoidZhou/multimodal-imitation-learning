@@ -464,7 +464,7 @@ class UR5Env:
         peg_position[2] -= 0.002
         peg_orientation = robot_position[1]
         self.apply_hybrid_controller(np.concatenate((desired_t, peg_orientation), axis=0),
-                                     physicsClientId=self.physicsClient_use, if_test=True)
+                                     physicsClientId=self.physicsClient_use, if_test=True, flag=0)
         # self.reset()
         angles = []
         angles_select = [-150, -30, 90, 210]
@@ -508,7 +508,7 @@ class UR5Env:
         self.hole_up_end = np.zeros(3)
         self.hole_up_end[0] = self.obj_t[0] - 0.0016
         self.hole_up_end[1] = self.obj_t[1] - 0.027
-        self.hole_up_end[2] = self.obj_t[2] + 0.11
+        self.hole_up_end[2] = self.obj_t[2] + 0.115
         self.target_joint_angles = p.calculateInverseKinematics(
             bodyUniqueId=self.ur5_id,
             endEffectorLinkIndex=7,
@@ -1347,7 +1347,7 @@ class UR5Env:
         action_to_target_pose = [None] * 3
         action_to_target_orie = [None] * 4
         action_to_current = [None] * 3
-        desired_force_z = -1  # N
+        desired_force_z = -0.5  # N
         desired_force_xy = 0.0  # N
         desired_force_rz = 0.0
         Kp_force = 0.1  # 比例增益
@@ -1475,7 +1475,7 @@ class UR5Env:
         return self.arm_desired_twist_, deta_arm_desired_twist
 
 
-    def apply_hybrid_controller(self, action, physicsClientId, if_test=False):
+    def apply_hybrid_controller(self, action, physicsClientId, if_test=False, flag=1):
         """ Make a step in simulation """
         position_arrive = False
         """
@@ -1517,7 +1517,13 @@ class UR5Env:
                                    {"Torque_z": self.Torque_z}, self.solve_steps)
             # if (self.rz < 5e-6 and self.dz < 5e-6) or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
             if if_test == True:
-                if (abs(self.rz) < 5e-2 and abs(self.deta_dz) < 5e-8) or self.insert_depth > 0.435 or self.solve_steps > 3000:
+                if flag==0:
+                    if (abs(self.rz) < 5e-2 and abs(
+                            self.force_z) > 0.01) or self.insert_depth > 0.436 or self.solve_steps > 3000:
+                        # if (abs(self.rz) < 5e-6):
+                        print("force err success")
+                        break
+                if (abs(self.rz) < 5e-2 and abs(self.deta_dz) < 5e-8) or self.insert_depth > 0.436 or self.solve_steps > 3000:
                 # if (abs(self.rz) < 5e-6):
                     print("force err success")
                     break

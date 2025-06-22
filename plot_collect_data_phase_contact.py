@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import lineStyles
 from scipy.spatial.transform import Rotation as R
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -9,15 +10,15 @@ def euler_to_rot_matrix(roll, pitch, yaw):
 
 
 def plot_collect_data_trajectory(trajectories,  colors, labels):
-    fig = plt.figure(figsize=(12, 8))
+    fig = plt.figure(figsize=(12, 8), facecolor=None)
     ax = fig.add_subplot(111, projection='3d')
 
     # 绘制每组轨迹
     for idx, data in enumerate(trajectories):
         # 绘制轨迹线
         ax.plot(
-            data[:, 0], data[:, 1], data[:, 2],
-            f'{colors[idx]}-', label=labels[idx], linewidth=1.5, alpha=0.6
+            data[:, 0], data[:, 1], data[:, 2], linestyle='-',
+            color=colors[idx], label=labels[idx], linewidth=2
         )
 
         # 在每个点绘制局部坐标系（调整step控制密度）
@@ -34,26 +35,36 @@ def plot_collect_data_trajectory(trajectories,  colors, labels):
             print(np.linalg.norm(quat))
             print(np.allclose(rot_matrix.T @ rot_matrix, np.eye(3), atol=1e-6))
             # 绘制X/Y/Z轴（RGB颜色）
+            c = 1
             for axis, color in zip(rot_matrix.T, ['g', 'r', 'b']):
                 ax.quiver(
                     pos[0], pos[1], pos[2],
                     axis[0], axis[1], axis[2],
                     color=color, length=axis_length,
-                    arrow_length_ratio=0.1,
-                    linewidth=0.5,
+                    arrow_length_ratio=0.2,
+                    linewidth=1,
                     alpha=0.7,  # 半透明避免遮挡
-                    label=f'{labels[idx]} Frame' if (idx == 0 and i == 0 and axis[0] > 0) else ""
+                    label=f'{labels[c]}' if (idx == 0 and i == 0) else ""
                 )
+                c += 1
 
     # 设置图形属性
     # ax.set_xlim([-0.1, 0.5])
     # ax.set_ylim([-0.1, 0.5])
-    ax.set_zlim([0.429999, 0.4301])
-    ax.set_xlabel('X (m)')
-    ax.set_ylabel('Y (m)')
-    ax.set_zlabel('Z (m)')
+    ax.set_zlim([0.429999, 0.430075])
+    ax.set_xlabel('X (m)', labelpad=19, fontsize=14)
+    ax.set_ylabel('Y (m)', labelpad=19, fontsize=14)
+    ax.set_zlabel('Z (m)', labelpad=19, fontsize=14)
+    # ax.set_box_aspect([0.6, 0.6, 1])  # 等轴比例
+    ax.view_init(elev=30, azim=45)  # 固定视角
+    ax.tick_params(axis='x', pad=10, labelsize=12)
+    ax.tick_params(axis='y', pad=10, labelsize=12)
+    ax.tick_params(axis='z', pad=10, labelsize=12)
+    ax.xaxis.pane.set_facecolor('none')
+    ax.yaxis.pane.set_facecolor('none')
+    ax.zaxis.pane.set_facecolor('none')
     # ax.set_title('Robot 3D Trajectory with Euler Angle Frames')
-    ax.legend()
+    ax.legend(fontsize=14)
     plt.tight_layout()
     plt.show()
 
@@ -98,10 +109,11 @@ def plot_collect_data_forces_torques(force_torque, title):
         ax_torque.set_xlabel('Steps', fontsize=12)
         ax_torque.set_ylabel('Torque (Nm)', fontsize=12)
         # ax_torque.set_title(f'{title} - Torque Components', fontsize=14)
-        ax_torque.grid(True, linestyle='--', alpha=0.5)
+        ax_torque.grid(True, linestyle='--', alpha=0.1)
         ax_torque.legend(loc='upper right')
 
         plt.tight_layout()
+        # plt.savefig('')
         plt.show()
 
 
@@ -111,8 +123,8 @@ if __name__ == '__main__':
     trajectories = [np.load(f) for f in file_names]  # 如果是.csv，用 np.loadtxt(f, delimiter=',')
 
     # 为每组轨迹设置颜色和标签
-    colors = ['y', 'm']  # 黄色、洋红色
-    labels = ['Robot A', 'Robot B']
+    colors = ['black', 'm']  # 黄色、洋红色
+    labels = ['trajectories', 'roll', 'pitch', 'yaw']
 
 
     plot_collect_data_trajectory(trajectories, colors, labels)
@@ -125,3 +137,4 @@ if __name__ == '__main__':
 
 
     plot_collect_data_forces_torques(trajectories, labels)
+    print("end")

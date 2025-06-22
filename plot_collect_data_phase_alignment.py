@@ -65,6 +65,7 @@ def normalize_rotation_matrix(rot_matrix):
     return np.array([axis/np.linalg.norm(axis) for axis in rot_matrix.T]).T
 
 def plot_phase_adjustment(trajectories):
+    labels = ['trajectories', 'roll', 'pitch', 'yaw']
     for idx, data in enumerate(trajectories):
         fixed_position = data[0, 0:3]
         num_points = len(data)
@@ -98,6 +99,7 @@ def plot_phase_adjustment(trajectories):
             # ========== 关键修改结束 ==========
 
             # 绘制坐标系（突出Z轴）
+            c = 1
             for j, (axis, col) in enumerate(zip(rot_matrix.T, ['g', 'r', 'b'])):
                 linewidth = 1 if j == 2 else 1.5  # 加粗Z轴
                 # alpha = 0.8
@@ -110,17 +112,17 @@ def plot_phase_adjustment(trajectories):
                     normalize=False,
                     arrow_length_ratio=0.15,
                     linewidth=linewidth,
-                    label='Yaw'
+                    label=f'{labels[c]}' if (idx == 0 and i == 0) else ""
                 )
-
+                c += 1
             # 标记关键点
             # if i % 10 == 0:
             #     ax.scatter(0, 0, z_pos, color=cmap(norm(i)), s=20)
 
         # 参考坐标系（灰色）
-        ref_axes = np.eye(3)
-        for axis, col in zip(ref_axes.T, ['0.7', '0.7', '0.7']):
-            ax.quiver(0, 0, total_height, *axis, length=0.3, color=col, alpha=0.5)
+        # ref_axes = np.eye(3)
+        # for axis, col in zip(ref_axes.T, ['0.7', '0.7', '0.7']):
+        #     ax.quiver(0, 0, total_height, *axis, length=0.3, color=col, alpha=0.5)
         # set_3d_axes_equal(ax)
 
         # 图形设置
@@ -130,6 +132,13 @@ def plot_phase_adjustment(trajectories):
         ax.set_xlabel('X')
         ax.set_ylabel('Y')
         ax.set_zlabel('Steps ↓', rotation=90, labelpad=15)
+        ax.view_init(elev=30, azim=45)  # 固定视角
+        ax.tick_params(axis='x', pad=15, labelsize=12)
+        ax.tick_params(axis='y', pad=15, labelsize=12)
+        ax.tick_params(axis='z', pad=15, labelsize=12)
+        ax.xaxis.pane.set_facecolor('none')
+        ax.yaxis.pane.set_facecolor('none')
+        ax.zaxis.pane.set_facecolor('none')
         # ax.set_title(f'Position Adjustment Trajectory on ', fontsize=12)
         ax.view_init(elev=25, azim=-60)
 
@@ -138,7 +147,7 @@ def plot_phase_adjustment(trajectories):
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax, orientation='vertical', pad=0.1)
         cbar.set_label('Steps Progression', labelpad=15)
-
+        ax.legend(fontsize=14)
         plt.tight_layout()
         plt.show()
 
