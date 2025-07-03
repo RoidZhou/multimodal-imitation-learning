@@ -329,7 +329,7 @@ class UR5Env:
         ##  第一步，连接仿真环境
         self.is_render = render
         if self.is_render:
-            self.physicsClient_use = p.connect(p.GUI)
+            self.physicsClient_use = p.connect(p.DIRECT)
             self.physicsClient_plan = p.connect(p.DIRECT)
         else:
             p.connect(p.DIRECT)
@@ -613,7 +613,7 @@ class UR5Env:
             robot_state_position = np.array(robot_state[0])
             FT = self.getForceTorque()
             current_force = np.array([FT[0], FT[1], FT[2]])
-            print("---- force ---", current_force)
+            # print("---- force ---", current_force)
 
             if np.linalg.norm(current_force) < -1:
                 robot_state_position[2] -= 0.009
@@ -1215,7 +1215,7 @@ class UR5Env:
         action_to_target_orie[3] = action[6]
 
         wrench_z = force_torque_base[0][2]
-        print("force_torque_base : ", force_torque_base)
+        # print("force_torque_base : ", force_torque_base)
         if abs(self.force_z) > 1:
             print("force_z")
         self.force_error_z = desired_force_z - wrench_z
@@ -1358,7 +1358,7 @@ class UR5Env:
         while 1:
             desired_twist, deta_desired_twist = self.impedance_controller(action, physicsClientId, if_test=False)
             desired_twist = np.array(desired_twist)
-            print("desired_twist: ", desired_twist)
+            # print("desired_twist: ", desired_twist)
             self.send_commands_to_robot(desired_twist[0], desired_twist[1], desired_twist[2], desired_twist[3], desired_twist[4], desired_twist[5], physicsClientId)
             current_Position = p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[4]
             current_Orientation = np.array(p.getLinkState(self.ur5_id, 7, physicsClientId=physicsClientId)[5])
@@ -1390,7 +1390,7 @@ class UR5Env:
                     break
                 if (abs(self.rz_tmp) < 5e-3) or self.insert_depth > 0.435 or self.solve_steps > 1000:
                     # if (abs(self.rz) < 5e-6):
-                    print("force err success")
+                    # print("force err success")
                     break
 
     def quaternion_to_euler(self, q1, q2):

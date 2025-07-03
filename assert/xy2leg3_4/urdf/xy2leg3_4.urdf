@@ -1,0 +1,744 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="xy2leg3_4">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-2.4285677057187E-05 -3.40659961850509E-06 -0.0560860672034413"
+        rpy="0 0 0" />
+      <!-- 0.940207614641788 -->
+      <mass
+        value="2.165135423215" />
+      <inertia
+        ixx="0.00283478870925274"
+        ixy="-9.29913071616552E-08"
+        ixz="3.35231942382488E-08"
+        iyy="0.00283654964894212"
+        iyz="-2.92864401286296E-06"
+        izz="0.00399388614445327" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="Right_Link1">
+    <inertial>
+      <origin
+        xyz="-0.00798254262591939 -9.31427232347959E-06 0.0359730809305004"
+        rpy="0 0 0" />
+      <mass
+        value="0.238485843809832" />
+      <inertia
+        ixx="0.000160475140221198"
+        ixy="2.15614316368876E-09"
+        ixz="-2.3480487725949E-06"
+        iyy="0.000162999840039312"
+        iyz="-2.2360550340939E-08"
+        izz="0.000140709087567943" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.854901960784314 0.854901960784314 0.854901960784314 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Right_Joint1"
+    type="revolute">
+    <origin
+      xyz="0 -0.08 -0.105"
+      rpy="3.14159265358979 0 1.5707963267949" />
+    <parent
+      link="base_link" />
+    <child
+      link="Right_Link1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="9"
+      velocity="4" />
+  </joint>
+  <link
+    name="Right_Link2">
+    <inertial>
+      <origin
+        xyz="-4.72148396074568E-07 0.0478095355574009 0.0108020509204528"
+        rpy="0 0 0" />
+      <mass
+        value="0.124068765233627" />
+      <inertia
+        ixx="8.21279872218073E-05"
+        ixy="1.10084349584764E-08"
+        ixz="2.26773725618879E-09"
+        iyy="3.44293186848553E-05"
+        iyz="2.84638254487491E-06"
+        izz="9.22284181673088E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Right_Joint2"
+    type="revolute">
+    <origin
+      xyz="-0.0425 0 0.0403"
+      rpy="1.5707963267949 0 -1.5707963267949" />
+    <parent
+      link="Right_Link1" />
+    <child
+      link="Right_Link2" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="9"
+      velocity="4" />
+  </joint>
+  <link
+    name="Right_Link3">
+    <inertial>
+      <origin
+        xyz="-0.0160034046847324 2.51880043855152E-05 0.0377326370598048"
+        rpy="0 0 0" />
+      <mass
+        value="0.154593914825605" />
+      <inertia
+        ixx="8.38192564239904E-05"
+        ixy="1.98734362466927E-08"
+        ixz="8.96304165315058E-06"
+        iyy="7.48512258350315E-05"
+        iyz="-2.29792706860056E-08"
+        izz="6.20557131549661E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Right_Joint3"
+    type="revolute">
+    <origin
+      xyz="0 0.0969 0.0113"
+      rpy="-1.5708 -1.5708 0" />
+    <parent
+      link="Right_Link2" />
+    <child
+      link="Right_Link3" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="1"
+      velocity="15" />
+  </joint>
+  <link
+    name="Right_Link4">
+    <inertial>
+      <origin
+        xyz="8.38603726068116E-05 -0.0716988598984499 0.00566605033693526"
+        rpy="0 0 0" />
+      <mass
+        value="0.145990872903138" />
+      <inertia
+        ixx="0.000190328165582237"
+        ixy="7.75934448313799E-07"
+        ixz="1.23516710356302E-07"
+        iyy="3.6299330306051E-05"
+        iyz="-1.86454563886242E-05"
+        izz="0.000193244351124464" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Right_Joint4"
+    type="revolute">
+    <origin
+      xyz="0.00799999999999998 0 0.0410000000000002"
+      rpy="-1.5707963267949 0 -1.5707963267949" />
+    <parent
+      link="Right_Link3" />
+    <child
+      link="Right_Link4" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="3"
+      velocity="12" />
+  </joint>
+  <link
+    name="Right_Link5">
+    <inertial>
+      <origin
+        xyz="-0.00235246219938839 -4.91734902503538E-05 0.030159145949856"
+        rpy="0 0 0" />
+      <mass
+        value="0.0964186497334596" />
+      <inertia
+        ixx="3.88653396488195E-05"
+        ixy="-7.12786212824832E-09"
+        ixz="3.78705792586167E-06"
+        iyy="3.34496753637897E-05"
+        iyz="3.09878098725422E-08"
+        izz="2.75854888400379E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Right_Joint5"
+    type="revolute">
+    <origin
+      xyz="0 -0.1364 0.00100000000000003"
+      rpy="1.5707963267949 1.5707963267949 0" />
+    <parent
+      link="Right_Link4" />
+    <child
+      link="Right_Link5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="1"
+      velocity="15" />
+  </joint>
+  <link
+    name="Right_Link6">
+    <inertial>
+      <origin
+        xyz="2.77555756156289E-17 -0.0363795805359993 0.0132595033662779"
+        rpy="0 0 0" />
+      <mass
+        value="0.15722469503807" />
+      <inertia
+        ixx="0.000104904778487601"
+        ixy="1.03870567366693E-20"
+        ixz="-1.34067289673582E-20"
+        iyy="0.000119175110761375"
+        iyz="1.37558505919017E-06"
+        izz="0.000132132492563202" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Right_Link6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Right_Joint6"
+    type="revolute">
+    <origin
+      xyz="0.0174000000000001 0 0.0359999999999998"
+      rpy="-1.5707963267949 0 -1.5707963267949" />
+    <parent
+      link="Right_Link5" />
+    <child
+      link="Right_Link6" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="1"
+      velocity="15" />
+  </joint>
+  <link
+    name="Left_Link1">
+    <inertial>
+      <origin
+        xyz="0.00798254262591885 -4.77268538488507E-05 0.0367785455178629"
+        rpy="0 0 0" />
+      <mass
+        value="0.238485843809827" />
+      <inertia
+        ixx="0.000160475140221196"
+        ixy="-1.78209141041167E-08"
+        ixz="2.36746192643362E-06"
+        iyy="0.000162803714469803"
+        iyz="5.15789180861714E-08"
+        izz="0.000140905213137449" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.854901960784314 0.854901960784314 0.854901960784314 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Left_Joint1"
+    type="revolute">
+    <origin
+      xyz="0 0.0799999999999999 -0.10425"
+      rpy="3.14159265358979 0 1.5707963267949" />
+    <parent
+      link="base_link" />
+    <child
+      link="Left_Link1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="9"
+      velocity="4" />
+  </joint>
+  <link
+    name="Left_Link2">
+    <inertial>
+      <origin
+        xyz="2.16197100637167E-05 -0.047809535557176 0.0104711728165324"
+        rpy="0 0 0" />
+      <mass
+        value="0.124068765231678" />
+      <inertia
+        ixx="8.21449745858241E-05"
+        ixy="7.03890766270855E-09"
+        ixz="-3.17625196092079E-08"
+        iyy="3.44293186899838E-05"
+        iyz="-2.83137770412717E-06"
+        izz="9.2211430808422E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Left_Joint2"
+    type="revolute">
+    <origin
+      xyz="0.04275 0 0.0410499999999999"
+      rpy="-1.5707963267949 0 -1.5707963267949" />
+    <parent
+      link="Left_Link1" />
+    <child
+      link="Left_Link2" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="9"
+      velocity="4" />
+  </joint>
+  <link
+    name="Left_Link3">
+    <inertial>
+      <origin
+        xyz="0.0160034046995862 -2.1528116532471E-05 0.0377308685252741"
+        rpy="0 0 0" />
+      <mass
+        value="0.154593914718528" />
+      <inertia
+        ixx="8.3819256479278E-05"
+        ixy="1.70358974376006E-08"
+        ixz="-8.96155666420268E-06"
+        iyy="7.48474546986155E-05"
+        iyz="2.53749334154722E-08"
+        izz="6.20594843464222E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Left_Joint3"
+    type="revolute">
+    <origin
+      xyz="0 -0.0968999999999997 0.0110499999999999"
+      rpy="1.5707963267949 1.5707963267949 0" />
+    <parent
+      link="Left_Link2" />
+    <child
+      link="Left_Link3" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="1"
+      velocity="15" />
+  </joint>
+  <link
+    name="Left_Link4">
+    <inertial>
+      <origin
+        xyz="5.88254674832728E-05 -0.0716988598984821 0.00571056085465921"
+        rpy="0 0 0" />
+      <mass
+        value="0.145990872903287" />
+      <inertia
+        ixx="0.00019039317968316"
+        ixy="7.81431775845142E-07"
+        ixz="8.49816608715177E-08"
+        iyy="3.62993303060254E-05"
+        iyz="-1.86551648393524E-05"
+        izz="0.000193179337023516" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Left_Joint4"
+    type="revolute">
+    <origin
+      xyz="-0.00800000000000006 0 0.0410000000000003"
+      rpy="-1.5707963267949 0 1.5707963267949" />
+    <parent
+      link="Left_Link3" />
+    <child
+      link="Left_Link4" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="3"
+      velocity="12" />
+  </joint>
+  <link
+    name="Left_Link5">
+    <inertial>
+      <origin
+        xyz="-0.00235246219927421 -4.88578173417631E-05 0.030210396820848"
+        rpy="0 0 0" />
+      <mass
+        value="0.0964186497324707" />
+      <inertia
+        ixx="3.8865339644391E-05"
+        ixy="-7.10358428368595E-09"
+        ixz="3.79445286776464E-06"
+        iyy="3.34495963673665E-05"
+        iyz="-3.11079958201533E-08"
+        izz="2.75855678320277E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Left_Joint5"
+    type="revolute">
+    <origin
+      xyz="0 -0.1364 0.000999999999999862"
+      rpy="1.5707963267949 1.5707963267949 0" />
+    <parent
+      link="Left_Link4" />
+    <child
+      link="Left_Link5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="1"
+      velocity="15" />
+  </joint>
+  <link
+    name="Left_Link6">
+    <inertial>
+      <origin
+        xyz="-9.71445146547012E-17 -0.036379580535999 0.0132595033662779"
+        rpy="0 0 0" />
+      <mass
+        value="0.15722469503807" />
+      <inertia
+        ixx="0.000104904778487601"
+        ixy="1.64842183134898E-20"
+        ixz="-1.74223427691823E-20"
+        iyy="0.000119175110761375"
+        iyz="1.37558505919017E-06"
+        izz="0.000132132492563202" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="/home/zhou/autolab/imitation_learning_idp3/assert/xy2leg3_4/meshes/Left_Link6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="Left_Joint6"
+    type="revolute">
+    <origin
+      xyz="0.0173999999999999 0 0.0360000000000003"
+      rpy="-1.5707963267949 0 -1.5707963267949" />
+    <parent
+      link="Left_Link5" />
+    <child
+      link="Left_Link6" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="1"
+      velocity="15" />
+  </joint>
+</robot>

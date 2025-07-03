@@ -1,0 +1,38 @@
+name: kjrobot
+
+shape_meta:
+  # acceptable types: rgb, low_dim
+  obs:
+    images:
+      shape: [ 3, 240, 320 ]
+      type: rgb
+    images_hand:
+      shape: [ 3, 240, 320 ]
+      type: rgb
+    agent_pos:
+      shape: [ 4 ]
+      type: low_dim
+    force:
+      shape: [ 3 ]
+      type: low_dim
+  action:
+    shape: [ 4 ]
+
+dataset:
+  _target_: imitation_learning_idp3.dataset.ur5_grasp_dataset_2d.UR5GraspDataset2D
+#  zarr_path: ./data/ur5_grasp/ur5_grasp.zarr
+#  zarr_path: ./data/ur5_assembly/ur5_assembly_only_orien.zarr
+  zarr_path: ./data/ur5_assembly/ur5_assembly_withforce.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.00
+  max_train_episodes: 90
+
+
+env:
+#  _target_: imitation_learning_idp3.env.ur5_grasp.ur5_grasp_3d_env.UR5Grasp3dEnv
+#  _target_: imitation_learning_idp3.env.ur5_assembly.ur5_assembly_env.UR5Env
+  _target_: imitation_learning_idp3.env.kj_robot.kj_2legs_env.KJRobotEnv
+#  _target_: imitation_learning_idp3.env.ur5_assembly.ur5_assembly_env_for_plot_collect_data_phase_align.UR5Env
