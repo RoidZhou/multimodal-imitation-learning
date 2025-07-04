@@ -211,7 +211,7 @@ class UR5Env:
         self.force_dim = 3
 
         self.randm_num = 1
-        self.writer = SummaryWriter('./HDQN_peg/collect_dataset_log')
+        self.writer = SummaryWriter('./HDQN_peg/collect_dataset_log/phase_contact')
         self.mointor_force_torque = np.zeros((2, 60))
         self.neibu = False
         self.sucessful_number = 0 # 迭代成功的次数
