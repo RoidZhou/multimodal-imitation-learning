@@ -1503,18 +1503,19 @@ class UR5Env:
             # print("self.force_error_z : ", self.force_error_z)
             joint_positions = p.getJointState(self.ur5_id, 6, physicsClientId=physicsClientId)[0]
             # print("self.position_error_y : ", self.position_error_y)
-            self.writer.add_scalars("force_x",
-                                   {"force_x": self.force_x}, self.solve_steps)
-            self.writer.add_scalars("force_y",
-                                   {"force_y": self.force_y}, self.solve_steps)
-            self.writer.add_scalars("force_z",
-                                   {"force_z": self.force_z}, self.solve_steps)
-            self.writer.add_scalars("Torque_x",
-                                   {"Torque_x": self.Torque_x}, self.solve_steps)
-            self.writer.add_scalars("Torque_y",
-                                   {"Torque_y": self.Torque_y}, self.solve_steps)
-            self.writer.add_scalars("Torque_z",
-                                   {"Torque_z": self.Torque_z}, self.solve_steps)
+            if flag == 1:
+                self.writer.add_scalars("force_x",
+                                       {"force_x": self.force_x}, self.solve_steps)
+                self.writer.add_scalars("force_y",
+                                       {"force_y": self.force_y}, self.solve_steps)
+                self.writer.add_scalars("force_z",
+                                       {"force_z": self.force_z}, self.solve_steps)
+                self.writer.add_scalars("Torque_x",
+                                       {"Torque_x": self.Torque_x}, self.solve_steps)
+                self.writer.add_scalars("Torque_y",
+                                       {"Torque_y": self.Torque_y}, self.solve_steps)
+                self.writer.add_scalars("Torque_z",
+                                       {"Torque_z": self.Torque_z}, self.solve_steps)
             # if (self.rz < 5e-6 and self.dz < 5e-6) or self.is_in_range(1, self.orientation_err, 5e-6) or self.angle_err < 0.1 or self.angle_err==None:
             if if_test == True:
                 if flag==0:
