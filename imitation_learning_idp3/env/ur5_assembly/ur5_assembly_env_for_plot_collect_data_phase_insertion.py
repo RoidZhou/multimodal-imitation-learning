@@ -277,7 +277,7 @@ class UR5Env:
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
         self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
-        p.changeVisualShape(self.tool_id[0], -1, rgbaColor=[0.95, 0.95, 0.95, 0.95])
+        # p.changeVisualShape(self.tool_id[0], -1, rgbaColor=[0.95, 0.95, 0.95, 0.95])
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
                          lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
@@ -400,7 +400,7 @@ class UR5Env:
         self.hole_up_end = np.zeros(3)
         self.hole_up_end[0] = self.obj_t[0] - 0.0016
         self.hole_up_end[1] = self.obj_t[1] - 0.027
-        self.hole_up_end[2] = self.obj_t[2] + 0.115
+        self.hole_up_end[2] = self.obj_t[2] + 0.117
 
         current_orie = p.getLinkState(self.ur5_id, 7)[5]
         self.target_joint_angles = p.calculateInverseKinematics(
@@ -957,13 +957,14 @@ class UR5Env:
             robot_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
             end_orn_euler = R.from_quat(robot_state[1]).as_euler('xyz', degrees=True)
             robot_state_position = np.array(robot_state[0])
-            new_state_euler = end_orn_euler + action
+            action[2] = 0.0
+            new_state_euler = end_orn_euler + action / 4
             action_quat = Rotation.from_euler('xyz', new_state_euler, degrees=True).as_quat()
-            FT = self.getForceTorque()
-            current_force = np.array([FT[0], FT[1], FT[2]])
+            self.step_FT = self.getForceTorque()
+            current_force = np.array([self.step_FT[0], self.step_FT[1], self.step_FT[2]])
             print("---- force ---", current_force)
-            if np.linalg.norm(current_force) < 0.1:
-                robot_state_position[2] -= 0.002
+            if np.linalg.norm(current_force) < 1:
+                robot_state_position[2] -= 0.0005
 
             for i in range(n_steps):
                 # ------------------------------------------求解器-------------------------------------------------------
