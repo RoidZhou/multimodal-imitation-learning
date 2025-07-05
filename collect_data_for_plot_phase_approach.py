@@ -59,7 +59,7 @@ def main(cfg: OmegaConf):
             point_clouds = data['point_clouds']
             states = data['states']
             actions = data['actions']
-            np.save("action_phase_approach.npy", actions)
+            np.save("action_HDQN_circle_approach.npy", actions)
         else:
             point_clouds = np.vstack((point_clouds, data['point_clouds']))
             states = np.vstack((states, data['states']))

@@ -429,7 +429,7 @@ class UR5Env:
         # --------------------------------------- 重置关节至初始状态------------------------------------这里有坑，p.resetJointState与p.setTimeStep()会导致初始姿态偏移
         init_end_orien = np.random.uniform(-1, 1)
         init_joint0_orien = np.random.uniform(-0.1, 0.1)
-        self.init_joint_val[5] += init_end_orien
+        # self.init_joint_val[5] += init_end_orien
         # self.init_joint_val[0] += init_joint0_orien
         for i in range(6):
             p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.init_joint_val[i])
