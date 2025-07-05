@@ -552,6 +552,18 @@ class KJRobotEnv:
                                                                         target_quaternions_right1[i],
                                                                         target_joint_values_right1[i - 1, 6:])
         target_joint_values_right = target_joint_values_right1[:, 0:6]
+        # 保存关节角度到 txt 文件
+        try:
+            np.savetxt('right_joints.txt', target_joint_values_right, fmt='%.6f', delimiter=' ')
+            print("Saved right joints to right_joints.txt")
+        except Exception as e:
+            print(f"Error saving right_joints.txt: {e}")
+
+        try:
+            np.savetxt('left_joints.txt', target_joint_values_left, fmt='%.6f', delimiter=' ')
+            print("Saved left joints to left_joints.txt")
+        except Exception as e:
+            print(f"Error saving left_joints.txt: {e}")
 
         # 测试插值之后路点
         # print('ik_r',ik_sol_r)
