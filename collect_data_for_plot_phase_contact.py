@@ -76,8 +76,8 @@ def main(cfg: OmegaConf):
             states = data['states']
             actions = data['actions']
             forces = data['forces']
-            np.save("action2.npy", actions)
-            np.save("forces2.npy", forces)
+            np.save("action_HDQN_circle_contact.npy", actions)
+            # np.save("forces_HDQN_square_contact.npy", forces)
         else:
             images = np.vstack((images, data['images']))
             images_hand = np.vstack((images_hand, data['images_hand']))
