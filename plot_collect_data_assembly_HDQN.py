@@ -2,11 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-
-def validate_and_plot(trajectories, colors, labels):
-    """带数据验证的增强版轨迹绘制函数"""
+def validate_and_plot(trajectories, colors, labels, marker_step=1):
+    """带数据验证的增强版轨迹绘制函数，中间点使用空心符号标记"""
     fig = plt.figure(figsize=(14, 10))
     ax = fig.add_subplot(111, projection='3d')
+
+    # 标记符号：圆形(o), 三角形(^), 方形(s)
+    markers = ['o', '^', 's']
 
     # ================== 数据验证阶段 ==================
     print("\n=== 数据验证报告 ===")
@@ -28,24 +30,23 @@ def validate_and_plot(trajectories, colors, labels):
 
     # ================== 可视化阶段 ==================
     print("\n=== 开始绘图 ===")
-    for idx, (data, color, label) in enumerate(zip(trajectories, colors, labels)):
+    for idx, (data, color, label, marker) in enumerate(zip(trajectories, colors, labels, markers)):
         # 绘制主轨迹
         line = ax.plot(data[:, 0]+idx*0.002, data[:, 1]+idx*0.002, data[:, 2]+idx*0.002,
                        color=color, label=label, linewidth=2.5)
 
-        # 标记关键点
-        ax.scatter(data[0, 0], data[0, 1], data[0, 2],
-                   color=color, marker='o', s=120) # , label=f'{label} Start'
-        ax.scatter(data[-1, 0], data[-1, 1], data[-1, 2],
-                   color=color, marker='X', s=150) # , label=f'{label} End'
+        # 绘制中间点（每隔 marker_step 个点，空心符号）
+        mid_points = data[1:-1:marker_step]
+        print(f"轨迹 {label} 中间点数: {len(mid_points)}")
+        ax.scatter(mid_points[:, 0]+idx*0.002, mid_points[:, 1]+idx*0.002, mid_points[:, 2]+idx*0.002,
+                   facecolors='none', edgecolors=color, marker=marker, s=60, alpha=0.7)
 
         # 添加轨迹序号标记
         mid_point = len(data) // 2
-        ax.text(data[mid_point, 0], data[mid_point, 1], data[mid_point, 2],
+        ax.text(data[mid_point, 0]+idx*0.002, data[mid_point, 1]+idx*0.002, data[mid_point, 2]+idx*0.002,
                 str(idx + 1), color='black', fontsize=12, ha='center')
 
     # ================== 坐标轴设置 ==================
-
     ax.set_xlabel('X (m)', fontsize=14, labelpad=15)
     ax.set_ylabel('Y (m)', fontsize=14, labelpad=15)
     ax.set_zlabel('Z (m)', fontsize=14, labelpad=15)
@@ -58,11 +59,8 @@ def validate_and_plot(trajectories, colors, labels):
 
     mid_x = (all_points[:, 0].max() + all_points[:, 0].min()) * 0.5
     mid_y = (all_points[:, 1].max() + all_points[:, 1].min()) * 0.5
-    mid_z = (all_points[:, 2].max() + all_points[:, 2].min()) * 0.5
-
     ax.set_xlim(mid_x - max_range, mid_x + max_range)
     ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    # ax.set_zlim(mid_z - max_range, mid_z + max_range)
     ax.set_zlim([0.42, 0.48])
 
     # 视角和样式设置
@@ -81,7 +79,6 @@ def validate_and_plot(trajectories, colors, labels):
 
     plt.tight_layout()
     plt.show()
-
 
 def load_and_process(files_list):
     """带数据预处理的加载函数"""
@@ -121,20 +118,19 @@ def load_and_process(files_list):
 
     return trajectories
 
-
 if __name__ == '__main__':
     # 文件配置
     file_groups = [
-        ['action_HDQN_circle_approach.npy', 'action_HDQN_circle_align.npy', 'action_HDQN_circle_contact.npy'],
-        ['action_HDQN_triangle_approach.npy', 'action_HDQN_triangle_align.npy', 'action_HDQN_triangle_contact.npy'],
-        ['action_HDQN_square_approach.npy', 'action_HDQN_square_align.npy', 'action_HDQN_square_contact.npy']
+        ['action_HDQN_eval_circle_approach.npy', 'action_HDQN_circle_align.npy', 'action_HDQN_circle_contact.npy'],
+        ['action_HDQN_eval_triangle_approach.npy', 'action_HDQN_triangle_align.npy', 'action_HDQN_triangle_contact.npy'],
+        ['action_HDQN_eval_square_approach.npy', 'action_HDQN_square_align.npy', 'action_HDQN_square_contact.npy']
     ]
 
     # 加载和处理数据
     trajectories = load_and_process(file_groups)
 
     # 可视化设置
-    colors = ['r', 'g', 'b']  # 专业配色
+    colors = ['r', 'g', 'b']
     labels = [
         'Circular Peg Trajectory',
         'Triangular Peg Trajectory',
@@ -144,4 +140,5 @@ if __name__ == '__main__':
     if not trajectories:
         print("错误: 没有有效数据可绘制")
     else:
-        validate_and_plot(trajectories, colors, labels)
+        validate_and_plot(trajectories, colors, labels, marker_step=1)
+    print("end")
