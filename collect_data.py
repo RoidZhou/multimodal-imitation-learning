@@ -65,7 +65,7 @@ def main(cfg: OmegaConf):
             actions = np.vstack((actions, data['actions']))
         episode_ends.append(states.shape[0])
 
-    filename = './data/ur5_assembly/ur5_assembly.zarr'
+    filename = './data/ur5_assembly/ur5_assembly_phase_approach_6d_pose.zarr'
     write_zarr(filename, point_clouds, states, actions, episode_ends)
 
 

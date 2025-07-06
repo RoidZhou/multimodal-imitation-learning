@@ -166,12 +166,6 @@ def quaternion_to_6d(quat: np.ndarray, order: str = 'xyzw') -> np.ndarray:
     # 取前两列并展平
     return rot_matrix[..., :2].reshape(*rot_matrix.shape[:-2], 6)
 
-def _6d_to_quaternion(sixd: np.ndarray) -> np.ndarray:
-    rot_matrix = sixd.reshape(-1, 3, 2)
-    r3 = np.cross(rot_matrix[..., 0], rot_matrix[..., 1])
-    full_matrix = np.concatenate([rot_matrix, r3[..., None]], axis=-1)
-    return Rotation.from_matrix(full_matrix).as_quat()
-
 def draw_coordinate_frame(pos, orn, axis_length, lifetime):
     rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
     axes = [
@@ -429,7 +423,7 @@ class UR5Env:
         # --------------------------------------- 重置关节至初始状态------------------------------------这里有坑，p.resetJointState与p.setTimeStep()会导致初始姿态偏移
         init_end_orien = np.random.uniform(-1, 1)
         init_joint0_orien = np.random.uniform(-0.1, 0.1)
-        # self.init_joint_val[5] += init_end_orien
+        self.init_joint_val[5] += init_end_orien
         # self.init_joint_val[0] += init_joint0_orien
         for i in range(6):
             p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=self.init_joint_val[i])
@@ -573,7 +567,7 @@ class UR5Env:
         desired_poses = np.zeros((time_step_num, self.numdof))
 
         states = np.zeros((every_epoch_num, self.action_dim))
-        actions = np.zeros((every_epoch_num, self.action_dim-2))
+        actions = np.zeros((every_epoch_num, self.action_dim))
         point_clouds = np.zeros((every_epoch_num, self.num_points, 6))
 
         time_cumsum = np.cumsum(time_array)
@@ -654,7 +648,7 @@ class UR5Env:
                 states[data_num, 3:self.action_dim] = state_orientation_6d
 
                 actions[data_num, :3] = action_position
-                actions[data_num, 3:self.action_dim-2] = peg_orientation
+                actions[data_num, 3:self.action_dim] = action_orientation
                 point_clouds[data_num, ...] = point_cloud
                 data_num += 1
 
@@ -699,7 +693,7 @@ class UR5Env:
             self.latest_action = action
             action_position = np.array(action[0:3])
             action_orientation_6d = np.array(action[3:self.action_dim])
-            action_orientation = _6d_to_quaternion(action_orientation_6d)
+            action_orientation = self._6d_to_quaternion(action_orientation_6d)
 
             for i in range(n_steps):
                 # ------------------------------------------求解器-------------------------------------------------------
@@ -985,3 +979,9 @@ class UR5Env:
             self.Visualize_rotation_center_UI.update(peg_link_pos, peg_link_Quaternion)
 
         return [peg_link_pos, peg_link_Quaternion]
+
+    def _6d_to_quaternion(self, sixd: np.ndarray) -> np.ndarray:
+        rot_matrix = sixd.reshape(-1, 3, 2)
+        r3 = np.cross(rot_matrix[..., 0], rot_matrix[..., 1])
+        full_matrix = np.concatenate([rot_matrix, r3[..., None]], axis=-1)
+        return Rotation.from_matrix(full_matrix).as_quat()

@@ -31,9 +31,10 @@ def main(cfg: OmegaConf):
     OmegaConf.resolve(cfg)
     policy = hydra.utils.instantiate(cfg.policy)
     env = hydra.utils.instantiate(cfg.task.env, cfg.task.shape_meta)
+    action_eval = np.zeros((30, 7))
     device = 'cuda:0'
     device = torch.device(device)
-    policy.load_state_dict(torch.load("model_300.pth", map_location=device, pickle_module=dill))
+    policy.load_state_dict(torch.load("model_600_phase_approach.pth", map_location=device, pickle_module=dill))
     policy.to(device)
     policy.eval()
 
@@ -77,8 +78,14 @@ def main(cfg: OmegaConf):
 
         action = actions[0, step_num % n_action_steps, :]
         obs, reward, done, info = env.step(action)
+        orien = env._6d_to_quaternion(action[3:9])
+        action_eval[step_num, 0:3] = action[0:3]
+        action_eval[step_num, 3:7] = orien
 
         step_num += 1
+        if step_num == 30:
+            np.save("action_HDQN_eval_square_approach.npy", action_eval)
+            break
         time_until_next_step = 1/env._timeStep - (time.time() - step_start)
         if time_until_next_step > 0:
             time.sleep(time_until_next_step)
