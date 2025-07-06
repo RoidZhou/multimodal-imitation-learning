@@ -46,8 +46,7 @@ def main(cfg: OmegaConf):
 
     obs = env.reset()
     # 初始化参数
-    # action_eval = np.zeros((30, 7))
-    action_eval = np.empty((0, 3))
+    action_eval = np.empty((0, 7))
     writer = SummaryWriter('./HDQN_peg/experimental_result_insertion')
     angles = []
     angles_select = [-150, -30, 90, 210]
@@ -148,8 +147,8 @@ def main(cfg: OmegaConf):
             time.sleep(time_until_next_step)
         robot_state_position = p.getLinkState(env.ur5_id, env.ur5EndEffectorIndex, computeForwardKinematics=1)
         curr_pose = robot_state_position[0]
-        action_pose = np.array(curr_pose)
-        # action_eval[step_num, 0:3] = curr_pose
+        action_pose = np.zeros(7)
+        action_pose[:3] = curr_pose
         action_eval = np.vstack((action_eval, action_pose))
         """ draw contact phase result """
         cur_peg_pos = p.getLinkState(env.ur5_id, 8)[4]
