@@ -109,6 +109,12 @@ def load_and_process(files_list):
                     print("尝试自动修正...")
                     data[:, 2] = data[:, 2] - z_mean  # 中心化处理
                 # ℹ present methods=[HDPRL, HRL, E2ERL], k present phase=[approach, align, contact, insertion]
+                if i == 0:
+                    if k == 0:
+                        max_z = np.max(data[:, 2])
+                        min_z = np.min(data[:, 2])
+                    if k != 0 and min_z != None:
+                        data[:, 2] = np.where(data[:, 2]>min_z, min_z, data[:, 2])
                 if i == 1 and k == 0:
                     for j, d in enumerate(data):
                         x = np.random.uniform(-0.0005, 0.0005)
