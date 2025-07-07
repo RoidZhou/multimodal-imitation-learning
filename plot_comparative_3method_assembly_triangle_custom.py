@@ -164,9 +164,9 @@ def load_and_process(files_list):
 if __name__ == '__main__':
     # 文件配置
     file_groups = [
-        ['action_HDQN_eval_circle_approach.npy', 'action_HDQN_circle_align.npy', 'action_HDQN_circle_contact.npy', 'action_HDQN_eval_circle_insertion.npy'],
-        ['action_HRL_eval_circle_approach.npy', 'action_HRL_circle_align.npy', 'action_HRL_circle_contact.npy', 'action_HRL_eval_circle_insertion.npy'],
-        ['action_E2ERL_eval_circle_approach.npy', 'action_E2ERL_circle_align.npy', 'action_E2ERL_circle_contact.npy', 'action_E2ERL_eval_circle_insertion.npy'],
+        ['action_HDQN_eval_triangle_approach.npy', 'action_HDQN_triangle_align.npy', 'action_HDQN_triangle_contact.npy', 'action_HDQN_eval_triangle_insertion.npy'],
+        ['action_HRL_eval_triangle_approach.npy', 'action_HRL_triangle_align.npy', 'action_HRL_triangle_contact.npy', 'action_HRL_eval_triangle_insertion.npy'],
+        ['action_E2ERL_eval_triangle_approach.npy', 'action_E2ERL_triangle_align.npy', 'action_E2ERL_triangle_contact.npy', 'action_E2ERL_eval_triangle_insertion.npy'],
     ]
 
     # 加载和处理数据
