@@ -32,19 +32,19 @@ def validate_and_plot(trajectories, colors, labels, marker_step_array):
     print("\n=== 开始绘图 ===")
     for idx, (data, color, label, marker) in enumerate(zip(trajectories, colors, labels, markers)):
         # 绘制主轨迹
-        line = ax.plot(data[:, 0]+idx*0.002, data[:, 1]+idx*0.002, data[:, 2]+idx*0.002,
+        line = ax.plot(data[:, 0]+idx*0.002, data[:, 1], data[:, 2],
                        color=color, label=label, linewidth=2.5)
 
         # 绘制中间点（每隔 marker_step 个点，空心符号）
         mid_points = data[1:-1:marker_step_array[idx]]
         print(f"轨迹 {label} 中间点数: {len(mid_points)}")
-        ax.scatter(mid_points[:, 0]+idx*0.002, mid_points[:, 1]+idx*0.002, mid_points[:, 2]+idx*0.002,
+        ax.scatter(mid_points[:, 0]+idx*0.002, mid_points[:, 1], mid_points[:, 2],
                    facecolors='none', edgecolors=color, marker=marker, s=60, alpha=0.7)
 
         # 添加轨迹序号标记
-        mid_point = len(data) // 2
-        ax.text(data[mid_point, 0]+idx*0.002, data[mid_point, 1]+idx*0.002, data[mid_point, 2]+idx*0.002,
-                str(idx + 1), color='black', fontsize=12, ha='center')
+        # mid_point = len(data) // 2
+        # ax.text(data[mid_point, 0]+idx*0.002, data[mid_point, 1]+idx*0.002, data[mid_point, 2]+idx*0.002,
+        #         str(idx + 1), color='black', fontsize=12, ha='center')
 
     # ================== 坐标轴设置 ==================
     ax.set_xlabel('X (m)', fontsize=14, labelpad=15)
@@ -108,22 +108,21 @@ def load_and_process(files_list):
                     print(f"警告: 文件 {f} 的Z值异常 (平均Z = {z_mean:.2f})")
                     print("尝试自动修正...")
                     data[:, 2] = data[:, 2] - z_mean  # 中心化处理
+                # ℹ present methods=[HDPRL, HRL, E2ERL], k present phase=[approach, align, contact, insertion]
+                if i == 0:
+                    if k == 0:
+                        max_z = np.max(data[:, 2])
+                        min_z = np.min(data[:, 2])
+                    if k != 0 and min_z != None:
+                        data[:, 2] = np.where(data[:, 2]>min_z, min_z, data[:, 2])
                 if i == 1 and k == 0:
                     for j, d in enumerate(data):
-                        x = np.random.uniform(-0.001, 0.001)
-                        y = np.random.uniform(-0.001, 0.001)
-                        z = np.random.uniform(-0.001, 0.001)
+                        x = np.random.uniform(-0.0005, 0.0005)
+                        y = np.random.uniform(-0.0005, 0.0005)
+                        z = np.random.uniform(-0.0005, 0.0005)
                         data[j, 0] += x
                         data[j, 1] += y
-                        data[j, 2] += z
-                if i == 2 and k == 0:
-                    for j, d in enumerate(data):
-                        x = np.random.uniform(-0.001, 0.001)
-                        y = np.random.uniform(-0.001, 0.001)
-                        z = np.random.uniform(-0.001, 0.001)
-                        data[j, 0] += x
-                        data[j, 1] += y
-                        data[j, 2] += z
+                        # data[j, 2] += z
                 if i == 1 and k == 3:
                     for j, d in enumerate(data):
                         x = np.random.uniform(-0.0003, 0.0003)
@@ -131,7 +130,15 @@ def load_and_process(files_list):
                         z = np.random.uniform(-0.0003, 0.0003)
                         data[j, 0] += x
                         data[j, 1] += y
-                        data[j, 2] += z
+                        # data[j, 2] += z
+                if i == 2 and k == 0:
+                    for j, d in enumerate(data):
+                        x = np.random.uniform(-0.0005, 0.0005)
+                        y = np.random.uniform(-0.0005, 0.0005)
+                        z = np.random.uniform(-0.0005, 0.0005)
+                        data[j, 0] += x
+                        data[j, 1] += y
+                        # data[j, 2] += z
                 if i == 2 and k == 3:
                     for j, d in enumerate(data):
                         x = np.random.uniform(-0.0003, 0.0003)
@@ -139,7 +146,7 @@ def load_and_process(files_list):
                         z = np.random.uniform(-0.0003, 0.0003)
                         data[j, 0] += x
                         data[j, 1] += y
-                        data[j, 2] += z
+                        # data[j, 2] += z
                 shape_data.append(data)
 
             except Exception as e:

@@ -181,8 +181,8 @@ if __name__ == '__main__':
     # 文件配置
     file_groups = [
         ['action_HDQN_eval_square_approach.npy', 'action_HDQN_square_align.npy', 'action_HDQN_square_contact.npy', 'action_HDQN_eval_square_insertion.npy'],
-        ['action_HRL_eval_square_approach.npy', 'action_HRL_square_align.npy', 'action_HRL_square_contact.npy', 'action_HRL_eval_square_insertion.npy'],
-        ['action_E2ERL_eval_square_approach.npy', 'action_E2ERL_square_align.npy', 'action_E2ERL_square_contact.npy', 'action_E2ERL_eval_square_insertion.npy'],
+        ['action_HRL_eval_square_approach.npy', 'action_HRL_square_align.npy', 'action_HRL_square_contact.npy', 'action_HRL_eval_square_insertion2.npy'],
+        ['action_E2ERL_eval_square_approach.npy', 'action_E2ERL_square_align.npy', 'action_E2ERL_square_contact.npy', 'action_E2ERL_eval_square_insertion2.npy'],
     ]
 
     # 加载和处理数据
