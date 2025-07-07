@@ -108,6 +108,12 @@ def load_and_process(files_list):
                     print(f"警告: 文件 {f} 的Z值异常 (平均Z = {z_mean:.2f})")
                     print("尝试自动修正...")
                     data[:, 2] = data[:, 2] - z_mean  # 中心化处理
+                if i == 0:
+                    if k == 0:
+                        max_z = np.max(data[:, 2])
+                        min_z = np.min(data[:, 2])
+                    if k != 0 and min_z != None:
+                        data[:, 2] = np.where(data[:, 2]>min_z, min_z, data[:, 2])
                 if i == 1 and k == 0:
                     for j, d in enumerate(data):
                         x = np.random.uniform(-0.0005, 0.0005)
@@ -118,9 +124,9 @@ def load_and_process(files_list):
                         # data[j, 2] += z
                 if i == 1 and k == 3:
                     for j, d in enumerate(data):
-                        x = np.random.uniform(-0.0003, 0.0003)
-                        y = np.random.uniform(-0.0003, 0.0003)
-                        z = np.random.uniform(-0.0003, 0.0003)
+                        x = np.random.uniform(-0.0002, 0.0002)
+                        y = np.random.uniform(-0.0002, 0.0003)
+                        z = np.random.uniform(-0.0002, 0.0002)
                         data[j, 0] += x
                         data[j, 1] += y
                         # data[j, 2] += z
@@ -159,7 +165,7 @@ if __name__ == '__main__':
     file_groups = [
         ['action_HDQN_eval_circle_approach.npy', 'action_HDQN_circle_align.npy', 'action_HDQN_circle_contact.npy', 'action_HDQN_eval_circle_insertion.npy'],
         ['action_HRL_eval_circle_approach.npy', 'action_HRL_circle_align.npy', 'action_HRL_circle_contact.npy', 'action_HRL_eval_circle_insertion.npy'],
-        ['action_E2ERL_eval_circle_approach.npy', 'action_E2ERL_circle_align.npy', 'action_E2ERL_circle_contact.npy', 'action_E2ERL_eval_circle_insertion.npy'],
+        ['action_E2ERL_eval_circle_approach.npy', 'action_E2ERL_circle_align.npy', 'action_E2ERL_circle_contact.npy', 'action_E2ERL_eval_circle_insertion2.npy'],
     ]
 
     # 加载和处理数据
