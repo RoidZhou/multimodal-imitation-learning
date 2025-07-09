@@ -508,7 +508,7 @@ class UR5Env:
         self.hole_up_end = np.zeros(3)
         self.hole_up_end[0] = self.obj_t[0] - 0.0016
         self.hole_up_end[1] = self.obj_t[1] - 0.027
-        self.hole_up_end[2] = self.obj_t[2] + 0.110
+        self.hole_up_end[2] = self.obj_t[2] + 0.115
         self.target_joint_angles = p.calculateInverseKinematics(
             bodyUniqueId=self.ur5_id,
             endEffectorLinkIndex=7,
@@ -1350,8 +1350,8 @@ class UR5Env:
         desired_force_z = -0.5  # N
         desired_force_xy = 0.0  # N
         desired_force_rz = 0.0
-        Kp_force = 0.1  # 比例增益
-        Ki_force = 0.02  # 积分增益
+        Kp_force = 0.5  # 比例增益
+        Ki_force = 0.2  # 积分增益
         Kd_force = 0.01  # 微分增益
         integral_force_error_z = 0.0
         previous_force_error_z = 0.0

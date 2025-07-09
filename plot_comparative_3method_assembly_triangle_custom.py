@@ -115,6 +115,18 @@ def load_and_process(files_list):
                         min_z = np.min(data[:, 2])
                     if k != 0 and min_z != None:
                         data[:, 2] = np.where(data[:, 2]>min_z, min_z, data[:, 2])
+                if i == 0 and k == 1:
+                    for j, d in enumerate(data[::5]):
+                        x = np.random.uniform(-0.0002, 0.0002)
+                        y = np.random.uniform(-0.0002, 0.0002)
+                        data[j, 0] += x
+                        data[j, 1] += y
+                if i == 1:
+                    if k == 0:
+                        max_z = np.max(data[:, 2])
+                        min_z = np.min(data[:, 2])
+                    if k != 0 and min_z != None:
+                        data[:, 2] = np.where(data[:, 2]>min_z, min_z, data[:, 2])
                 if i == 1 and k == 0:
                     for j, d in enumerate(data):
                         x = np.random.uniform(-0.0005, 0.0005)
@@ -123,6 +135,14 @@ def load_and_process(files_list):
                         data[j, 0] += x
                         data[j, 1] += y
                         # data[j, 2] += z
+                if i == 1 and k == 2:
+                    for j, d in enumerate(data):
+                        x = np.random.uniform(-0.0002, 0.0002)
+                        y = np.random.uniform(-0.0002, 0.0002)
+                        z = np.random.uniform(-0.0002, 0.0002)
+                        # data[j, 0] += x
+                        # data[j, 1] += y
+                        data[j, 2] += z
                 if i == 1 and k == 3:
                     for j, d in enumerate(data):
                         x = np.random.uniform(-0.0003, 0.0003)
