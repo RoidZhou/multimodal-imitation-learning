@@ -47,7 +47,7 @@ def main(cfg: OmegaConf):
     obs = env.reset()
     # 初始化参数
     action_eval = np.empty((0, 7))
-    writer = SummaryWriter('./HDQN_peg/experimental_result_insertion')
+    writer = SummaryWriter('./HDQN_peg/experimental_result_insertion/HDPRL')
     angles = []
     angles_select = [-150, -30, 90, 210]
     for i in range(4):
@@ -117,29 +117,19 @@ def main(cfg: OmegaConf):
 
         action = actions[0, step_num % n_action_steps, :]
         obs, reward, done, info = env.step(action)
-        current_force = np.array([FT[0], FT[1], FT[2]])
-        print(current_force)
-        Fext = [env.step_FT[0], env.step_FT[1], env.step_FT[2]]
-        Text = [env.step_FT[3], env.step_FT[4], env.step_FT[5]]
-        force_x = Fext[0]
-        force_y = Fext[1]
-        force_z = Fext[2]
 
-        Torque_x = Text[0]
-        Torque_y = Text[1]
-        Torque_z = Text[2]
         writer.add_scalars("force_x",
-                                {"force_x": force_x}, step_num)
+                                {"force_x": env.force_x}, step_num)
         writer.add_scalars("force_y",
-                                {"force_y": force_y}, step_num)
+                                {"force_y": env.force_y}, step_num)
         writer.add_scalars("force_z",
-                                {"force_z": force_z}, step_num)
+                                {"force_z": env.force_z}, step_num)
         writer.add_scalars("Torque_x",
-                                {"Torque_x": Torque_x}, step_num)
+                                {"Torque_x": env.Torque_x}, step_num)
         writer.add_scalars("Torque_y",
-                                {"Torque_y": Torque_y}, step_num)
+                                {"Torque_y": env.Torque_y}, step_num)
         writer.add_scalars("Torque_z",
-                                {"Torque_z": Torque_z}, step_num)
+                                {"Torque_z": env.Torque_z}, step_num)
 
         step_num += 1
         time_until_next_step = 1/env._timeStep - (time.time() - step_start)
