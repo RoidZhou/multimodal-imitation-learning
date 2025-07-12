@@ -1350,8 +1350,8 @@ class UR5Env:
         desired_force_z = -0.5  # N
         desired_force_xy = 0.0  # N
         desired_force_rz = 0.0
-        Kp_force = 0.5  # 比例增益
-        Ki_force = 0.2  # 积分增益
+        Kp_force = 0.4  # 比例增益
+        Ki_force = 0.05  # 积分增益
         Kd_force = 0.01  # 微分增益
         integral_force_error_z = 0.0
         previous_force_error_z = 0.0
