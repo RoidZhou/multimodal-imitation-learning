@@ -1,0 +1,1794 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import skfuzzy as fuzz
+from tensorboardX import SummaryWriter
+import gym
+from gym import error, spaces, utils
+import pybullet as p
+import pybullet_data
+import open3d as o3d
+import random
+import math
+from collections import namedtuple
+from attrdict import AttrDict
+from scipy.spatial.transform import Rotation as R
+import symbol
+from sympy import *
+from typing import Any, Dict, Union
+sin = math.sin
+from scipy.spatial.transform import Rotation
+import transforms3d as tfs
+import numpy as np
+from IPython import display
+import pybullet as p
+import math
+import time
+import cv2
+import sys
+import struct
+import serial
+import serial.tools.list_ports
+from socket import *
+import minimalmodbus as mm
+from spatialmath import SE3
+import spatialmath as sm
+from numpy.ma.core import argmin
+import pyrealsense2 as rs
+from multiprocessing import Process, Queue
+import time
+import math
+import os
+import multiprocessing
+sys.path.append('../../../imitation_learning_idp3')
+from imitation_learning_idp3.arm.motion_planning import LinePositionParameter, OneAttitudeParameter, CartesianParameter, \
+    QuinticVelocityParameter, TrajectoryParameter, TrajectoryPlanner
+
+def fix_center_rotation(end_pos, end_orn, relative_offset, relative_euler, dy_M=0.055):
+    """
+       目的：固定点旋转
+       Arguments:
+       - end_pos: len=3, 该 link 的在世界坐标系的位置
+       - end_orn: len=4, 该 link 的在世界坐标系的姿态 (x, y, z, w)
+       - relative_offset 该 link下的相对移动 list of 3
+       - relative_euler  该 link下的旋转  list of 3
+       用法：eeink_link_next_Rotation_matrix = fix_center_rotation(self.current_pos, self.current_orie, [-0.05,0,0], [0, 0.3, 0])
+       -[-0.05,0,0] eelink与固定轴端面的距离(X,Y,Z)
+       - [0, 0.3, 0] 绕固定轴端面的旋转欧拉角(x,y,z)
+
+       Returns:
+       - eeink_link_next_Rotation_matrix: shape=(4, 4), transform matrix, represents this link next pose in world frame
+       """
+    # 前置变换：先平移eelink
+
+    # peg_link_Rotation_matrix=relative_pos_and_ore_form_world(end_pos, end_orn, relative_offset, [0, 0, 0])#只平移不旋转
+    # peg_link_Quaternion = Rotation.from_matrix(peg_link_Rotation_matrix[:3, :3]).as_quat()
+    # peg_link_pos = peg_link_Rotation_matrix[:3, -1]
+
+    # 1.先将eelink变换到peg末端坐标系,再平移相对位置
+    peg_link_Rotation_matrix = relative_pos_and_ore_form_world(end_pos, end_orn,
+                                                               [relative_offset[0] + dy_M, relative_offset[1] + 0,
+                                                                relative_offset[2] + 0], [0, 0, 0])  #
+    peg_link_Quaternion = Rotation.from_matrix(peg_link_Rotation_matrix[:3, :3]).as_quat()
+    peg_link_pos = peg_link_Rotation_matrix[:3, -1]
+
+    # 2.eelink在peg坐标系做完旋转
+    eeink_link_next_Rotation_matrix = relative_pos_and_ore_form_world(peg_link_pos, peg_link_Quaternion, [0, 0, 0],
+                                                                      relative_euler)
+    # 3.通过相对坐标系平移变换，将peg坐标下的eelink坐标映射回真实eelink坐标
+    eeink_link_next_Rotation_matrix = relative_pos_and_ore_form_world(eeink_link_next_Rotation_matrix[:3, -1],
+                                                                      Rotation.from_matrix(
+                                                                          eeink_link_next_Rotation_matrix[:3,
+                                                                          :3]).as_quat(),
+                                                                      [-dy_M, 0, 0], [0, 0, 0])
+
+    return eeink_link_next_Rotation_matrix
+
+def relative_pos_and_ore_form_world(end_pos, end_orn, relative_offset, relative_euler):
+    """
+    目的：将该link下的相对移动和转动映射到绝对坐标下(当然，前两个值的父坐标系不是绝对坐标系，则以相关坐标系为准）
+    Arguments:
+    - end_pos: len=3, 该 link 的在世界坐标系的位置
+    - end_orn: len=4, 该 link 的在世界坐标系的姿态 (x, y, z, w)
+    - relative_offset 该 link下的相对移动 list of 3
+    - relative_euler  该 link下的旋转  list of 3
+    - Rotation.from_euler('XYZ', move_euler).as_matrix() 大写是内旋动轴旋转，小写相反
+
+    注意：请注意该函数先旋转后移动，务必注意自己的变换要求！
+
+    Returns:
+    - wcT: shape=(4, 4), transform matrix, represents this link pose in world frame
+    """
+
+    end_orn = R.from_quat(end_orn).as_matrix()
+    wcT = np.eye(4)
+    # wcT[:3, 3] = end_orn.dot(relative_offset) + end_pos #注意：务必注意自己的变换要求！
+    fg = Rotation.from_euler('xyz', relative_euler).as_matrix()
+    wcT[:3, :3] = np.matmul(end_orn[:3, :3], fg)
+    wcT[:3, 3] = end_orn.dot(relative_offset) + end_pos
+
+    return wcT
+
+def get_quaternion_from_matrix(matrix, isprecise=False):
+    "0->w,1->x,2->y,3->z"
+    M = np.array(matrix, dtype=np.float64, copy=False)[:4, :4]
+    if isprecise:
+        q = np.empty((4, ))
+        t = np.trace(M)
+        if t > M[3, 3]:
+            q[0] = t
+            q[3] = M[1, 0] - M[0, 1]
+            q[2] = M[0, 2] - M[2, 0]
+            q[1] = M[2, 1] - M[1, 2]
+        else:
+            i, j, k = 0, 1, 2
+            if M[1, 1] > M[0, 0]:
+                i, j, k = 1, 2, 0
+            if M[2, 2] > M[i, i]:
+                i, j, k = 2, 0, 1
+            t = M[i, i] - (M[j, j] + M[k, k]) + M[3, 3]
+            q[i] = t
+            q[j] = M[i, j] + M[j, i]
+            q[k] = M[k, i] + M[i, k]
+            q[3] = M[k, j] - M[j, k]
+            q = q[[3, 0, 1, 2]]
+        q *= 0.5 / math.sqrt(t * M[3, 3])
+    else:
+        m00 = M[0, 0]
+        m01 = M[0, 1]
+        m02 = M[0, 2]
+        m10 = M[1, 0]
+        m11 = M[1, 1]
+        m12 = M[1, 2]
+        m20 = M[2, 0]
+        m21 = M[2, 1]
+        m22 = M[2, 2]
+        # symmetric matrix K
+        K = np.array([[m00-m11-m22, 0.0,         0.0,         0.0],
+                      [m01+m10,     m11-m00-m22, 0.0,         0.0],
+                      [m02+m20,     m12+m21,     m22-m00-m11, 0.0],
+                      [m21-m12,     m02-m20,     m10-m01,     m00+m11+m22]])
+        K /= 3.0
+        # quaternion is eigenvector of K that corresponds to largest eigenvalue
+        w, V = np.linalg.eigh(K)
+        q = V[[3, 0, 1, 2], np.argmax(w)]
+    if q[0] < 0.0:
+        np.negative(q, q)
+    return q
+
+class DebugAxes(object):
+    """
+    可视化某个局部坐标系, 红色x轴, 绿色y轴, 蓝色z轴
+    """
+
+    def __init__(self):
+        self.uids = [-1, -1, -1]
+
+    def update(self, pos, orn):
+        """
+        Arguments:
+        - pos: len=3, position in world frame
+        - orn: len=4, quaternion (x, y, z, w), world frame
+        """
+        pos = np.asarray(pos).reshape(3)
+
+        rot3x3 = R.from_quat(orn).as_matrix()
+        axis_x, axis_y, axis_z = rot3x3.T
+        self.uids[0] = p.addUserDebugLine(pos, pos + axis_x * 0.05, [1, 0, 0], replaceItemUniqueId=self.uids[0])
+        self.uids[1] = p.addUserDebugLine(pos, pos + axis_y * 0.05, [0, 1, 0], replaceItemUniqueId=self.uids[1])
+        self.uids[2] = p.addUserDebugLine(pos, pos + axis_z * 0.05, [0, 0, 1], replaceItemUniqueId=self.uids[2])
+
+class Forceusb():
+    '''
+    modbus通讯，注册并获取力控数值
+    有做零位减法，每次初始化就是置零的过程
+    '''
+    def __init__(self):
+        self.BAUDRATE=19200
+        self.BYTESIZE=8
+        self.PARITY="N"
+        self.STOPBITS=1
+        self.TIMEOUT=0.2
+        self.PORTNAME=self.serial_ports()
+        self.SLAVEADDRESS=9
+        self.ser=serial.Serial(port=self.PORTNAME, baudrate=self.BAUDRATE, bytesize=self.BYTESIZE, parity=self.PARITY, stopbits=self.STOPBITS, timeout=self.TIMEOUT)
+        self.packet = bytearray()
+        self.sendCount=0
+        while self.sendCount<50:
+            self.packet.append(0xff)
+            self.sendCount=self.sendCount+1
+        self.ser.write(self.packet)
+        self.ser.close()
+        #Communication setup
+        mm.BAUDRATE=self.BAUDRATE
+        mm.BYTESIZE=self.BYTESIZE
+        mm.PARITY=self.PARITY
+        mm.STOPBITS=self.STOPBITS
+        mm.TIMEOUT=self.TIMEOUT
+        self.ft300=mm.Instrument(self.PORTNAME, slaveaddress=self.SLAVEADDRESS)
+        self.registers=self.ft300.read_registers(180,6)
+        # Save measured values at rest. Those values are use to make the zero of the sensor.
+        self.fxZero=self.forceConverter(self.registers[0])
+        self.fyZero=self.forceConverter(self.registers[1])
+        self.fzZero=self.forceConverter(self.registers[2])
+        self.txZero=self.torqueConverter(self.registers[3])
+        self.tyZero=self.torqueConverter(self.registers[4])
+        self.tzZero=self.torqueConverter(self.registers[5])
+
+        self.ft_data = []
+        self.num = 0
+
+
+    def close(self):
+        self.ft300.serial.close()
+    def serial_ports(self):#自动寻找端口
+        ports = list(serial.tools.list_ports.comports())
+        for port_no, description, address in ports:
+            if 'USB' in description:
+                return port_no
+
+
+    def forceConverter(self,forceRegisterValue):
+        """Return the force corresponding to force register value.
+
+        input:
+            forceRegisterValue: Value of the force register
+
+        output:
+            force: force corresponding to force register value in N
+        """
+        force=0
+        forceRegisterBin=bin(forceRegisterValue)[2:]
+        forceRegisterBin="0"*(16-len(forceRegisterBin))+forceRegisterBin
+        if forceRegisterBin[0]=="1":
+            #negative force
+            force=-1*(int("1111111111111111",2)-int(forceRegisterBin,2)+1)/100
+        else:
+            #positive force
+            force=int(forceRegisterBin,2)/100
+        return force
+
+
+    def torqueConverter(self,torqueRegisterValue):
+        """Return the torque corresponding to torque register value.
+
+        input:
+            torqueRegisterValue: Value of the torque register
+
+        output:
+            torque: torque corresponding to force register value in N.m
+        """
+        torque=0
+
+        torqueRegisterBin=bin(torqueRegisterValue)[2:]
+        torqueRegisterBin="0"*(16-len(torqueRegisterBin))+torqueRegisterBin
+        if torqueRegisterBin[0]=="1":
+            #negative force
+            # torque=-1*(int("1111111111111111",2)-int(torqueRegisterBin[1:],2)+1)/1000
+            torque=-1*(int("1111111111111111",2)-int(torqueRegisterBin,2)+1)/1000
+        else:
+            #positive force
+            torque=int(torqueRegisterBin,2)/1000
+        return torque
+
+    def SN(self,snValue):
+        pass
+
+
+    def get_current_ft(self):
+        """
+        获得力传感器数值
+        """
+        registers=self.ft300.read_registers(180,6)
+        fx=round(self.forceConverter(registers[0])-self.fxZero,2)
+        fy=round(self.forceConverter(registers[1])-self.fyZero,2)
+        fz=round(self.forceConverter(registers[2])-self.fzZero,2)
+        tx=round(self.torqueConverter(registers[3])-self.txZero,2)
+        ty=round(self.torqueConverter(registers[4])-self.tyZero,2)
+        tz=round(self.torqueConverter(registers[5])-self.tzZero,2)
+        ft = [fx, fy, fz, tx, ty, tz]
+        self.ft_data.append(ft)
+        # print("ft", ft[3:6])
+        return ft
+
+class socket_TCp_UR30003():
+    def __init__(self):
+        self.host_name = "192.168.1.102"
+        self.port_num = 30003
+        self.ClientSocket = socket(AF_INET, SOCK_STREAM)
+        self.ClientSocket.connect((self.host_name, self.port_num))
+
+    def UR_30003Script(self, send_data):
+        # print(send_data)
+        self.ClientSocket.send(send_data.encode('utf8'))
+
+    def UR_30003rt(self, Meaning):
+
+        dic = {'MessageSize': 'i', 'Time': 'd', 'q target': '6d', 'qd target': '6d', 'qdd target': '6d',
+               'I target': '6d',
+               'M target': '6d', 'q actual': '6d', 'qd actual': '6d', 'I actual': '6d', 'I control': '6d',
+               'Tool vector actual': '6d', 'TCP speed actual': '6d', 'TCP force': '6d', 'Tool vector target': '6d',
+               'TCP speed target': '6d', 'Digital input bits': 'd', 'Motor temperatures': '6d', 'Controller Timer': 'd',
+               'Test value': 'd', 'Robot Mode': 'd', 'Joint Modes': '6d', 'Safety Mode': 'd', 'empty1': '6d',
+               'Tool Accelerometer values': '3d',
+               'empty2': '6d', 'Speed scaling': 'd', 'Linear momentum norm': 'd', 'SoftwareOnly': 'd',
+               'softwareOnly2': 'd', 'V main': 'd',
+               'V robot': 'd', 'I robot': 'd', 'V actual': '6d', 'Digital outputs': 'd', 'Program state': 'd',
+               'Elbow position': '3d', 'Elbow velocity': '3d'}
+        data = self.ClientSocket.recv(1220)
+        ii = range(len(dic))
+        for key, i in zip(dic, ii):
+            fmtsize = struct.calcsize(dic[key])
+            info, data = data[0:fmtsize], data[fmtsize:]
+            fmt = "!" + dic[key]
+            dic[key] = dic[key], struct.unpack(fmt, info)
+        f = 1
+
+        return dic[Meaning]
+
+    def get_current_pose(self):
+        tcp_socket = socket(AF_INET, SOCK_STREAM)
+        tcp_socket.connect((self.host_name, self.port_num))
+        data = tcp_socket.recv(1108)
+        # print(len(data))
+        position = struct.unpack('!6d', data[444:492])
+        orientation = struct.unpack('!6d', data[492:540])
+        tcp_socket.close()
+        return np.asarray(position), np.asarray(orientation)
+
+    def get_state_cart(self):
+        self.tcp_socket = socket(AF_INET, SOCK_STREAM)
+        self.tcp_socket.connect((self.host_name, self.port_num))
+        state_data = self.tcp_socket.recv(1500)
+        actual_joint_positions = self.parse_tcp_state_data(state_data, 'cartesian_info')
+
+        self.tcp_socket.close()
+        return actual_joint_positions
+
+    def get_state_joint(self):
+        self.tcp_socket = socket(AF_INET, SOCK_STREAM)
+        self.tcp_socket.connect((self.host_name, self.port_num))
+        state_data = self.tcp_socket.recv(1500)
+        actual_joint_positions = self.parse_tcp_state_data(state_data, 'joint_data')
+
+        self.tcp_socket.close()
+        return actual_joint_positions
+
+    def parse_tcp_state_data(self, data, subpasckage):
+        dic = {'MessageSize': 'i', 'Time': 'd', 'q target': '6d', 'qd target': '6d', 'qdd target': '6d',
+               'I target': '6d',
+               'M target': '6d', 'q actual': '6d', 'qd actual': '6d', 'I actual': '6d', 'I control': '6d',
+               'Tool vector actual': '6d', 'TCP speed actual': '6d', 'TCP force': '6d', 'Tool vector target': '6d',
+               'TCP speed target': '6d', 'Digital input bits': 'd', 'Motor temperatures': '6d', 'Controller Timer': 'd',
+               'Test value': 'd', 'Robot Mode': 'd', 'Joint Modes': '6d', 'Safety Mode': 'd', 'empty1': '6d',
+               'Tool Accelerometer values': '3d',
+               'empty2': '6d', 'Speed scaling': 'd', 'Linear momentum norm': 'd', 'SoftwareOnly': 'd',
+               'softwareOnly2': 'd',
+               'V main': 'd',
+               'V robot': 'd', 'I robot': 'd', 'V actual': '6d', 'Digital outputs': 'd', 'Program state': 'd',
+               'Elbow position': 'd', 'Elbow velocity': '3d'}
+        ii = range(len(dic))
+        for key, i in zip(dic, ii):
+            fmtsize = struct.calcsize(dic[key])  # 计算key对应value的size
+            data1, data = data[0:fmtsize], data[fmtsize:]  # 根据size分割数据
+            fmt = "!" + dic[key]
+            dic[key] = dic[key], struct.unpack(fmt, data1)
+
+        if subpasckage == 'joint_data':  # get joint data
+            q_actual_tuple = dic["q actual"]
+            joint_data = np.array(q_actual_tuple[1])
+            return joint_data
+        elif subpasckage == 'cartesian_info':
+            Tool_vector_actual = dic["Tool vector actual"]  # get x y z rx ry rz
+            cartesian_info = np.array(Tool_vector_actual[1])
+            return cartesian_info
+
+    def speed_l(self, xd, a, t, aRot='a'):
+        """
+            Tool speed eg: speedl([0.5,0.4,0,1.57,0,0], 0.5, 0.5)
+            xd: tool speed
+            a: tool position acceleration
+            t: time
+            aRot: tool acceleration 没定义a则使用这个
+        """
+        self.tcp_socket = socket(AF_INET, SOCK_STREAM)
+        self.tcp_socket.connect((self.host_name, self.port_num))
+        tcp_command = 'speedl([%f' % xd[0]
+        for i in range(1, 6):
+            tcp_command = tcp_command + (',%f' % xd[i])
+        tcp_command = tcp_command + '],a=%f,t=%f)' % (a, t)
+        print(tcp_command)
+        self.tcp_socket.send(str.encode(tcp_command))
+        self.tcp_socket.close()
+
+    def movej_offset(self, offset):
+        '''TCP_pos:是当前tool的
+        '''
+        send_data = f'''
+    def whf():
+        set_tcp(p[0,0,0,0,0,0])
+        global pose=get_actual_tcp_pose()
+        global P= pose_trans(pose,p[{offset[0]},{offset[1]},{offset[2]},{offset[3]},{offset[4]},{offset[5]}])
+        # global P2=get_inverse_kin(P)
+        movej(P, a=0.05, v=0.25, t=0, r=0)
+
+
+    end
+        '''
+        # print(send_data)
+        self.UR_30003Script(send_data)  # 30003发送
+
+    def movej(self, offset):
+        '''TCP_pos:是当前tool的
+        '''
+        send_data = f'''
+    def whf():
+        set_tcp(p[0,0,0,0,0,0])
+        # global pose=[{offset[0]},{offset[1]},{offset[2]},{offset[3]},{offset[4]},{offset[5]}]
+        # popup(pose)
+        movej([{offset[0]},{offset[1]},{offset[2]},{offset[3]},{offset[4]},{offset[5]}], a=0.05, v=0.25, t=0.5, r=0)
+
+
+    end
+            '''
+        self.UR_30003Script(send_data)  # 30003发送 t=2.1
+
+    # 直接控制六个轴的速度
+    def speedj(self, offset, time=1):
+        send_data = f'''
+    def whf():
+        set_tcp(p[0,0,0,0,0,0])
+        speedj([{offset[0]},{offset[1]},{offset[2]},{offset[3]},{offset[4]},{offset[5]}], 1, {time})
+    end
+            '''
+        self.UR_30003Script(send_data)  # 30003发送
+
+    def speed_j(self, qd, a=0.5, t=5):
+        """
+            Joint speed eg: speedj([0.2,0.3,0.1,0.05,0,0], 0.5, 0.5)
+            qd: joint speed
+            a: acceleration
+            t: time
+        """
+        self.tcp_socket = socket(AF_INET, SOCK_STREAM)
+        self.tcp_socket.connect((self.host_name, self.port_num))
+        tcp_command = "speedj([%f" % qd[0]
+        for joint_idx in range(1, 6):
+            tcp_command = tcp_command + (",%f" % qd[joint_idx])
+        tcp_command = tcp_command + "],a=%f,t=%f)\n" % (a, t)
+        self.tcp_socket.send(str.encode(tcp_command))
+        self.tcp_socket.close()
+
+    # 直接控制六个轴的速度
+    def speedl(self, offset):
+        send_data = f'''
+    def whf():
+        set_tcp(p[0,0,0,0,0,0])
+        speedl([{offset[0]},{offset[1]},{offset[2]},{offset[3]},{offset[4]},{offset[5]}], 0.5)
+    end
+            '''
+        self.UR_30003Script(send_data)  # 30003发送
+
+    # 控制末端速度类似speedl，但是是欧拉角下
+    def speedj_offset(self, offset):
+
+        send_data = f'''
+    def whf():
+        set_tcp(p[0,0,0,0,0,0])
+        global pose=get_actual_tcp_pose()
+        global P= pose_trans(pose,p[{offset[0]},{offset[1]},{offset[2]},{offset[3]},{offset[4]},{offset[5]}])
+        global P2=get_inverse_kin(pose)
+        global P3=get_inverse_kin(P)
+        global P4=[P3[0]-P2[0],P3[1]-P2[1],P3[2]-P2[2],P3[3]-P2[3],P3[4]-P2
+        [4],P3[5]-P2[5]]
+        speedj(P4, 0.2,0.5)
+    end
+            '''
+        # print(send_data)
+        self.UR_30003Script(send_data)  # 30003发送
+
+        # [-0.08972922650022963, -1.6219628747300388, -2.0232094758251753, -1.0464530101386091, 1.5717372302313297,
+        #  -0.08981790491708695]
+
+class CameraInfo:
+    def __init__(self, width, height, fx, fy, cx, cy, scale=1.0):
+        self.width = width
+        self.height = height
+        self.fx = fx
+        self.fy = fy
+        self.cx = cx
+        self.cy = cy
+        self.scale = scale
+
+def get_realsense_ids():
+    ctx = rs.context()
+    devices = ctx.query_devices()
+    serials = [dev.get_info(rs.camera_info.serial_number) for dev in devices]
+    serials.sort()
+    print(f"Found {len(serials)} devices: {serials}")
+    return serials
+
+def grid_sample_pcd(points, grid_size=0.01):
+    coords = points[:, :3]
+    scaled = np.floor(coords / grid_size).astype(int)
+    keys = scaled[:, 0] + scaled[:, 1] * 10000 + scaled[:, 2] * 100000000
+    _, indices = np.unique(keys, return_index=True)
+    return points[indices]
+
+class CameraProcess(Process):
+    def __init__(self, serial, queue, cam_index, IMG_WIDTH, IMG_HEIGHT, NUM_POINTS, Z_NEAR, Z_FAR, GRID_SIZE):
+        super().__init__()
+        self.serial = serial
+        self.queue = queue
+        self.cam_index = cam_index
+        self.IMG_WIDTH = IMG_WIDTH
+        self.IMG_HEIGHT = IMG_HEIGHT
+        self.NUM_POINTS = NUM_POINTS
+        self.Z_NEAR = Z_NEAR
+        self.Z_FAR = Z_FAR
+        self.GRID_SIZE = GRID_SIZE
+
+    def run(self):
+        try:
+            time.sleep(self.cam_index * 2)
+            pipeline = rs.pipeline()
+            config = rs.config()
+            config.enable_device(self.serial)
+            config.enable_stream(rs.stream.color, self.IMG_WIDTH, self.IMG_HEIGHT, rs.format.rgb8, 30)
+            config.enable_stream(rs.stream.depth, self.IMG_WIDTH, self.IMG_HEIGHT, rs.format.z16, 30)
+            profile = pipeline.start(config)
+            align = rs.align(rs.stream.color)
+
+            device = profile.get_device()
+            # for sensor in device.query_sensors():
+            #     if sensor.is_depth_sensor():
+            #         sensor.set_option(rs.option.inter_cam_sync_mode, 0)
+
+            depth_sensor = device.first_depth_sensor()
+            depth_scale = depth_sensor.get_depth_scale()
+
+            intr = profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
+            camera_info = CameraInfo(intr.width, intr.height, intr.fx, intr.fy, intr.ppx, intr.ppy, scale=depth_scale)
+
+            print(f"[Cam {self.cam_index}] Camera {self.serial} initialized.")
+
+            while True:
+                frames = pipeline.wait_for_frames()
+                aligned = align.process(frames)
+
+                color_frame = aligned.get_color_frame()
+                depth_frame = aligned.get_depth_frame()
+                if not color_frame or not depth_frame:
+                    continue
+
+                color = np.asanyarray(color_frame.get_data())
+                color = cv2.cvtColor(color, cv2.COLOR_RGB2BGR)
+                depth = np.asanyarray(depth_frame.get_data()).astype(np.float32) * depth_scale
+
+                point_cloud = self.create_point_cloud(color, depth, camera_info)
+
+                if self.queue.full():
+                    self.queue.get_nowait()
+                self.queue.put((color, depth, point_cloud))
+        except Exception as e:
+            print(f"[Cam {self.cam_index}] Error: {e}")
+        finally:
+            try:
+                pipeline.stop()
+            except:
+                pass
+
+    def create_point_cloud(self, color, depth, camera_info):
+        H, W = depth.shape
+        xmap, ymap = np.meshgrid(np.arange(W), np.arange(H))
+
+        z = depth
+        x = (xmap - camera_info.cx) * z / camera_info.fx
+        y = (ymap - camera_info.cy) * z / camera_info.fy
+
+        points = np.stack((x, y, z), axis=-1).reshape(-1, 3)
+        colors = color.reshape(-1, 3)
+
+        valid = (z > self.Z_NEAR) & (z < self.Z_FAR)
+        valid = valid.reshape(-1)
+        points = points[valid]
+        colors = colors[valid]
+
+        pc = np.hstack((points, colors))
+        pc = grid_sample_pcd(pc, grid_size=self.GRID_SIZE)
+
+        if pc.shape[0] > self.NUM_POINTS:
+            indices = np.random.choice(pc.shape[0], self.NUM_POINTS, replace=False)
+            pc = pc[indices]
+        elif pc.shape[0] < self.NUM_POINTS:
+            pad = np.zeros((self.NUM_POINTS - pc.shape[0], 6))
+            pc = np.vstack((pc, pad))
+
+        return pc
+
+class MultiRealSense:
+    def __init__(self, IMG_WIDTH, IMG_HEIGHT, front_cam_idx=0, right_cam_idx=1,):
+        self.serials = get_realsense_ids()
+        self.processes = []
+        self.queues = []
+
+        self.front_queue = None
+        self.right_queue = None
+        self.front_serial = None
+        self.right_serial = None
+        self.IMG_WIDTH = IMG_WIDTH
+        self.IMG_HEIGHT = IMG_HEIGHT
+        self.NUM_POINTS = 2048
+        self.Z_NEAR, self.Z_FAR = 0.1, 1.5
+        self.GRID_SIZE = 0.01
+
+        for idx, serial in enumerate(self.serials):
+            q = Queue(maxsize=2)
+            p = CameraProcess(serial, q, idx, self.IMG_WIDTH, self.IMG_HEIGHT, self.NUM_POINTS, self.Z_NEAR, self.Z_FAR, self.GRID_SIZE)
+            p.start()
+            self.processes.append(p)
+            self.queues.append(q)
+
+            if idx == front_cam_idx:
+                self.front_queue = q
+                self.front_serial = serial
+            if idx == right_cam_idx:
+                self.right_queue = q
+                self.right_serial = serial
+
+    def __call__(self):
+        cam_dict = {}
+        if self.front_queue and not self.front_queue.empty():
+            color, depth, pcd = self.front_queue.get()
+            cam_dict.update({
+                "front_color": color,
+                "front_depth": depth,
+                "front_pointcloud": pcd
+            })
+        if self.right_queue and not self.right_queue.empty():
+            color, depth, pcd = self.right_queue.get()
+            cam_dict.update({
+                "right_color": color,
+                "right_depth": depth,
+                "right_pointcloud": pcd
+            })
+        return cam_dict
+
+    def finalize(self):
+        for p in self.processes:
+            p.terminate()
+            p.join()
+
+    def __del__(self):
+        self.finalize()
+
+def tile_images(images):
+    cols = math.ceil(math.sqrt(len(images)))
+    rows = math.ceil(len(images) / cols)
+    blank = np.zeros_like(images[0])
+    result_rows = []
+
+    for r in range(rows):
+        row_imgs = images[r * cols:(r + 1) * cols]
+        if len(row_imgs) < cols:
+            row_imgs += [blank] * (cols - len(row_imgs))
+        result_rows.append(np.hstack(row_imgs))
+
+    return np.vstack(result_rows)
+
+class UR5Env:
+    metadata = {'render.modes': ['human']}
+    def __init__(self, render=True):
+        super().__init__()
+        self.log =[]
+
+        self.randm_num = 1
+        self.writer = SummaryWriter('./HDQN_peg/collect_data_plot_insertion')
+        self.mointor_force_torque = np.zeros((2, 60))
+        self.neibu = False
+        self.sucessful_number = 0 # 迭代成功的次数
+        self.all_number = 0  # 迭代次数
+        self.epsiode_timesteps = 0
+        self.max_steps_one_episode = 50#26
+        self.step_counter = 0
+        self.goal_cont = 0
+
+        self.quat_rot_err = np.zeros(4)
+        self.current_twist_lin = np.zeros((3, 1))
+        self.current_twist_ang = np.zeros((3, 1))
+        self.arm_desired_twist_ = np.mat(np.zeros((6, 1)))
+        self.arm_desired_position_ = np.mat(np.zeros((3, 1)))
+        self.arm_max_acc_ = 1
+        self.duration = 0.2
+        self.obj_t = np.zeros(3)
+        self.num_points = 4096 * 2
+        self.control_hz = 100
+
+        self.Visualize_rotation_center_UI = DebugAxes()  # 可视化旋转中心
+        self.goalPosition1 = DebugAxes()  # 可视化 eelink 坐标
+        self.goalPosition_eelink = DebugAxes()  # 可视化 eelink 坐标
+
+        self.image_width = 320
+        self.image_height = 240
+
+        # 连接真实相机
+        self.IMG_WIDTH, self.IMG_HEIGHT = 640, 480
+        self.cam_system = MultiRealSense(self.IMG_WIDTH, self.IMG_HEIGHT)
+        self.latest = {}
+        self.Z_NEAR, self.Z_FAR = 0.1, 1.5
+        # 机械臂实际执行频率，ur5真实通讯频率是120hz
+        self._timeStep = 100
+        self.t = (1 / self._timeStep)*2
+        self.T0 = sm.SE3()
+
+        self.robot_control_joint_name = ["shoulder_pan_joint",
+                                         "shoulder_lift_joint",
+                                         "elbow_joint",
+                                         "wrist_1_joint",
+                                         "wrist_2_joint",
+                                         "wrist_3_joint"]
+
+        # --------------------------- 重置关节至初始状态--------------------------------
+
+        # self.init_joint_val =[0.17195291679571792, -1.2151152721500111, -2.042115573329094,
+        #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态
+        # self.init_joint_val =[0.10195291679571792, -1.2151152721500111, -2.050115573329094,
+        #                       -1.4551581329978485, 1.5707963241241731, 0.17195291700664328]#标准垂直姿态,接触桌面
+        self.init_joint_val =[-0.1665, -1.6147, -1.9169, -1.1679, 1.6084, 0.0052]#标准垂直姿态,不接触桌面
+        # 插孔是否失败阈值
+        self.ftmax = [200, 100]
+        self.threshold = [150, 100]
+
+        # 定义初始值
+        self.done = False
+        self.tool_pos = [-0.3992177129905079, 0.04993405718861182, 0.4478437960506524]
+        self.pre_orie = [0.0, 0.0, 0.0, 0.0]
+        self.deuler = [0, 0, 0]
+        self.dpos = [0, 0, 0]
+
+        self.euler_init = [2.50928407, 1.22967306, -0.59999855]
+        # 目标的插孔深度
+        self.depth = 0.05
+        # ---------------------------------定义初始状态--------------------------------------------
+        self.current_pos = []
+        self.current_orie = []
+        self.state = 0
+        self.next_state = 0
+        # 定义初始动作
+        # self.action = 0
+        # 初始姿态
+        self.init_joint_positions = [0, -1.203, -1.799, -1.69, 1.57, 0]
+        # 初始末端工具的四元数
+        self.init_orie_tool = [0.7070727237014777, 0.0, 0.0, 0.7071408370313327]
+        # 机器人初始四元数
+        self.init_orie = [-0.6997116804122925, -0.0003609205596148968, 0.7144252061843872, 0.0002908592578023672]
+        self.joint_indices = [0,1,2,3,4,5]  # 你的机器人关节索引列表
+        # --------------------------------------------------------------------------
+
+        # 关节跳跃值
+        self.joint_damping = [0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001]
+        self.real_robot_connect = socket_TCp_UR30003()  # 机械臂建立链接
+        self.Fusb = Forceusb()
+        # 自带数据库地址
+        self.urdf_root_path = pybullet_data.getDataPath()
+
+        ##  第一步，连接仿真环境
+        self.is_render = render
+        if self.is_render:
+            self.physicsClient_use = p.connect(p.GUI)
+            self.physicsClient_plan = p.connect(p.DIRECT)
+        else:
+            p.connect(p.DIRECT)
+        # 设定界面显示视角
+        p.resetDebugVisualizerCamera(cameraDistance=1.5,
+                                     cameraYaw=0,
+                                     cameraPitch=-40,
+                                     cameraTargetPosition=[0.55, -0.35, 0.2])
+
+        # -----------------------------------------------------------------------添加模型-----------------------------------------------------------------------------------------------
+        # 添加pybullet的额外数据地址，使程序可以直接调用到内部的一些模型
+        p.setAdditionalSearchPath(pybullet_data.getDataPath())
+
+        self.tool_id = p.loadSDF("./assert/ur_description/urdf/platform/urdf/platform.sdf")
+        p.changeVisualShape(self.tool_id[0], -1, rgbaColor=[0.95, 0.95, 0.95, 0.95])
+        """ 用于测试恒力跟踪"""
+        p.changeDynamics(self.tool_id[0], -1,
+                         lateralFriction=100, spinningFriction=100, rollingFriction=0, frictionAnchor=True)
+
+        #  直的
+        p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.12],
+                                          p.getQuaternionFromEuler([0, 0, 0]))#100宽度*100高*孔21
+        self.init_height = 0.32+0.08
+        self.goalPosition =[-0.4+0.05, 0.1-0.05, 0.32+0.08]
+
+        # 添加桌子模型
+        self.table_id = p.loadURDF("table/table.urdf", basePosition=[-1.01, 0, -0.515])
+
+        # 添加机器人模型
+        self.ur5_id = p.loadURDF(
+            "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
+            basePosition=[0, 0, 0.1], flags=9)
+        self.ur5_id_plan = p.loadURDF(
+            "./assert/ur_description/urdf/ur5_robot_sensor_eelink_triangle.urdf",
+            basePosition=[0, 0, 0.1], flags=9, physicsClientId = self.physicsClient_plan)
+        p.changeVisualShape(self.ur5_id, 8, rgbaColor=[0.1, 0.1, 0.1, 0.3])
+        self.ur5EndEffectorIndex = 7
+        self.numdof = 6
+        self.numjoint = p.getNumJoints(self.ur5_id)
+        for j in range(p.getNumJoints(self.ur5_id)):
+            print(j, p.getJointInfo(self.ur5_id, j))
+        link_color = [[1,0,0,1], # red
+                      [0,1,0,1], # green
+                      [0,0,1,1]] # blue
+
+        # p.changeVisualShape(self.ur5_id, 9, rgbaColor=link_color[2])
+        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+        hole_orientation = p.getBasePositionAndOrientation(self.tool_id[0])[1]
+        self.obj_t = hole_position
+        # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+        # obs = self.get_observation()
+        # observation_vw_shape = obs["achieved_goal"].shape
+        # observation_depth_shape = obs["desired_goal"].shape
+
+        # # 状态空间的值后续再研究
+        # self.observation_space = gym.spaces.Dict(
+        #     dict(
+        #         achieved_goal=gym.spaces.Box(-100.0, 100.0, shape=observation_vw_shape, dtype=np.float32),
+        #         desired_goal=gym.spaces.Box(-100.0, 100.0, shape=observation_depth_shape, dtype=np.float32),
+        #     )
+        # )
+        # ------------------------------| modified by YbZhou |--------------------------
+        self.position_x_low     = -0.1
+        self.position_x_high    = 0.1
+        self.position_y_low     = -0.1
+        self.position_y_high    = 0.1
+        self.position_z_low     = -0.1
+        self.position_z_high    = 0
+        self.orientation_x_low  = -1
+        self.orientation_x_high = 1
+        self.orientation_y_low  = -1
+        self.orientation_y_high = 1
+        self.orientation_z_low  = -1
+        self.orientation_z_high = 1
+        self.orientation_w_low  = -1
+        self.orientation_w_high = 1
+
+        self.pose_adjust_low     = 0 
+        self.pose_adjust_high    = 1
+        self.orien_adjust_low    = 0
+        self.orien_adjust_high   = 1
+        # 构建导纳控制的三个系数矩阵
+        """
+        when k=80, d=40, m=10 => w=5 l=1 : need 13 steps
+        when k=80, d=56, m=10 => w=2.82 l=1 : need 17 steps
+        """
+        self.In_M = 0.1 # M = 10， inverse_M = 1/M 
+        self.translational_stiffness = 80
+        self.rotational_stiffness = 10
+        self.translational_damping = 40
+        self.translational_damping = 10
+
+        self.Inverse_M = np.mat(self.In_M * np.eye(6))
+
+        self.stiffness = np.mat(np.block([
+            [self.translational_stiffness * np.eye(3), np.zeros((3, 3))],
+            [np.zeros((3, 3)), self.rotational_stiffness * np.eye(3)]
+        ]))
+
+        self.damping = np.mat(np.block([
+            [self.translational_damping * np.eye(3), np.zeros((3, 3))],
+            [np.zeros((3, 3)), self.translational_damping * np.eye(3)]
+        ]))
+
+        # 设定参数动作空间
+        self.action_space = spaces.Box(low=np.array([self.position_x_low,self.position_y_low,self.position_z_low,
+                                                     self.orientation_x_low,self.orientation_y_low,self.orientation_z_low,self.orientation_w_low,
+                                                     self.pose_adjust_low, self.orien_adjust_low]),
+                                       high=np.array([self.position_x_high,self.position_y_high,self.position_z_high,
+                                                      self.orientation_x_high,self.orientation_y_high,self.orientation_z_high,self.orientation_w_high,
+                                                      self.pose_adjust_high, self.orien_adjust_high]), 
+                                       dtype=np.float32)
+        # ------------------------------| modified by YbZhou |--------------------------
+        # 设置Z方向的重力
+        p.setGravity(0, 0, 0)
+
+    def reset(self):
+        self.zero_Position = np.zeros(3)
+        self.zero_Orientation = np.zeros(4)
+        self.solve_steps = 0
+
+        # 安全设置
+        safe_pose = [-0.1665, -1.6147, -1.9169, -1.1679, 1.6084, 0.0052]  # peg in hole
+        for i in range(6):
+            p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=safe_pose[i])
+
+        p.setJointMotorControlArray(self.ur5_id, [1, 2, 3, 4, 5, 6],
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=list(safe_pose),
+                                    forces=np.array([87.0, 87.0, 87.0, 87.0, 60, 60]))
+
+        # ----------------------将更新频率设置为真实频率---------------------
+        p.setTimeStep(1.0 / self._timeStep)
+        for _ in range(240):
+            p.stepSimulation()
+        # self.real_robot_connect.movej(safe_pose)
+        # time.sleep(2.1)
+        #
+        # self.reset_Force_sensor()
+        # joint_ = self.real_robot_connect.get_state_joint()
+        # print("joint: ", joint_)
+        # self.set_sim_pose(joint_)
+        # current_pose = p.getLinkState(self.ur5_id, 7)[4]
+        # current_orie = p.getLinkState(self.ur5_id, 7)[5]
+        # print("pose, orien", current_pose, current_orie)
+        # state = self.real_robot_connect.get_state_cart()
+        # real_pose = state[:3]
+        # print("real_pose", real_pose)
+        # while True:
+        #     # 获取当前的关节力和力矩
+        #     FT = self.getPureForceTorqueEnd()
+        #
+        #     Fext = FT[0:3]
+        #     Text = FT[3:]
+        #     force_torque_base = self.cart_to_base_force_torque(np.array(Fext), np.array(Text), current_pose,
+        #                                                        current_orie)
+        #     print(force_torque_base)
+
+
+        # 返回初始的观测量
+        return self.get_observation()
+
+    def reset_Force_sensor(self):
+        '''传感器重新连接，自动置零'''
+        A = True
+        time.sleep(2)
+        while A == True:
+            try:
+                self.Fusb.close()
+                self.Fusb = Forceusb()
+                A = False
+            except:
+                time.sleep(0.5)
+                A = True
+
+    def set_sim_pose(self, joint_pose):
+        for i in range(6):
+            p.resetJointState(bodyUniqueId=self.ur5_id, jointIndex=i + 1, targetValue=joint_pose[i])
+
+        p.setJointMotorControlArray(self.ur5_id, [1, 2, 3, 4, 5, 6],
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=list(joint_pose),
+                                    forces=np.array([87.0, 87.0, 87.0, 87.0, 60, 60]))
+
+        # ----------------------将更新频率设置为真实频率---------------------
+        p.setTimeStep(1.0 / self._timeStep)
+        for _ in range(240):
+            p.stepSimulation()
+
+    # 获取机器人纯净受力，不做改变
+    def getPureForceTorqueEnd(self):
+        """
+        获取机器人当前关节力/力矩
+        """
+
+        data_sub = 3
+        FT_o = np.zeros([data_sub, 6])
+
+        for i in range(data_sub):
+            FT_o[i, :] = np.array(self.Fusb.get_current_ft(), dtype=float).reshape(1, 6)
+
+        f_T = np.mean(FT_o[1:], axis=0)
+        force = f_T[0:3]
+        torque = f_T[3:]
+        d = 0.042 - 0.0034
+        FT = [int(force[2] * 10) / 10, int(force[0] * 10) / 10, int(force[1] * 10) / 10,
+              int(torque[2] * 100) / 100, -int((torque[0] - force[1] * d) * 100) / 100, -int((torque[1] + d * force[0]) * 100) / 100]
+        print(FT)
+        return FT
+
+    def cart_to_base_force_torque(self, xyz_force, xyz_torque, position, orientation):
+        """
+        将末端坐标系下的六维力转换到基坐标系。
+
+        参数：
+            xyz_force: 末端坐标系下的力 (3x1 矩阵)。
+            xyz_torque: 末端坐标系下的力矩 (3x1 矩阵)。
+            orientation: 末端坐标系的姿态（四元数或欧拉角）。
+            position: 末端坐标系的位置 (3x1 向量)。
+
+        返回：
+            force_torque_base: 基坐标系下的六维力 (6x1 矩阵)。
+        """
+        import numpy as np
+        from scipy.spatial.transform import Rotation as R
+
+        # 将姿态转换为旋转矩阵
+        if len(orientation) == 4:  # 四元数
+            rotation = R.from_quat(orientation)
+        else:  # 欧拉角
+            rotation = R.from_euler('xyz', orientation, degrees=False)
+        rotation_matrix = rotation.as_matrix()
+
+        # 转换力
+        force_base = rotation_matrix @ xyz_force
+
+        # 转换力矩
+        r = np.array(position)
+        torque_base = rotation_matrix @ xyz_torque
+
+        # 组合结果
+        force_torque_base = np.vstack((force_base, torque_base))
+        return force_torque_base
+
+    def run(self):
+        # planner 0
+        time0 = 0.001
+        joint_pose1 = [-0.1829, -1.8140, -2.0854, -0.7688, 1.5897, 0.0356]
+        self.set_sim_pose(joint_pose1)
+        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        peg_position = robot_position[0]
+        peg_orientation = robot_position[1]
+        self.go_real(peg_position, peg_orientation)
+
+        end_peg_matrix = np.eye(4)
+        end_peg_matrix[:3, :3] = R.from_quat(peg_orientation).as_matrix()
+        end_peg_matrix[:3, 3] = peg_position
+        T0 = SE3(end_peg_matrix)
+        t0 = T0.t
+        R0 = sm.SO3(T0.R)
+        t1 = t0.copy()
+        R1 = R0.copy()
+        planner0 = self.cal_planner(t0, R0, t1, R1, time0)
+
+        # planner 1
+        time1 = 2.0
+        joint_pose2 = [-0.1829, -1.8140, -2.0854, -0.7688, 1.5897, -0.6946]
+        self.set_sim_pose(joint_pose2)
+        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        peg_position = robot_position[0]
+        peg_orientation = robot_position[1]
+        self.go_real(peg_position, peg_orientation)
+
+        end_peg_matrix = np.eye(4)
+        end_peg_matrix[:3, :3] = R.from_quat(peg_orientation).as_matrix()
+        end_peg_matrix[:3, 3] = peg_position
+        T2 = SE3(end_peg_matrix)
+        t2 = T2.t
+        R2 = sm.SO3(T2.R)
+        planner1 = self.cal_planner(t1, R1, t2, R2, time1)
+
+        # planner 2
+        time2 = 0.5
+        joint_pose3 = [-0.1827, -1.8260, -2.0769, -0.7897, 1.5895, -0.6946]
+        self.set_sim_pose(joint_pose3)
+        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        peg_position = robot_position[0]
+        peg_orientation = robot_position[1]
+        self.go_real(peg_position, peg_orientation)
+
+        end_peg_matrix = np.eye(4)
+        end_peg_matrix[:3, :3] = R.from_quat(peg_orientation).as_matrix()
+        end_peg_matrix[:3, 3] = peg_position
+        T3 = SE3(end_peg_matrix)
+        t3 = T3.t
+        R3 = sm.SO3(T3.R)
+        planner2 = self.cal_planner(t2, R2, t3, R3, time2)
+
+        # planner 3
+        time3 = 0.5
+        joint_pose4 = [-0.1780, -1.8758, -2.0905, -0.7459, 1.5756, -0.6946]
+        self.set_sim_pose(joint_pose4)
+        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        peg_position = robot_position[0]
+        peg_orientation = robot_position[1]
+        self.go_real(peg_position, peg_orientation)
+
+        end_peg_matrix = np.eye(4)
+        end_peg_matrix[:3, :3] = R.from_quat(peg_orientation).as_matrix()
+        end_peg_matrix[:3, 3] = peg_position
+        T4 = SE3(end_peg_matrix)
+        t4 = T4.t
+        R4 = sm.SO3(T4.R)
+        planner3 = self.cal_planner(t3, R3, t4, R4, time3)
+
+        # calculate all planner
+        time_array = np.array([0, time0, time1, time2, time3])
+        planner_array = [planner0, planner1, planner2, planner3]
+        total_time = np.sum(time_array)
+
+        record_time_array = np.array([0, time0, time1, time2, time3])
+        record_time = np.sum(record_time_array)
+        record_time_num = round(record_time * self._timeStep)
+        time_step_num = round(total_time * self._timeStep) + 1
+        every_step_num = 10
+        every_epoch_num = time_step_num // every_step_num
+        times = np.linspace(0, total_time, time_step_num)
+        desired_poses = np.zeros((time_step_num, self.numdof))
+
+        states = np.zeros((every_epoch_num, 7))
+        actions = np.zeros((every_epoch_num, 3))
+        point_clouds = np.zeros((every_epoch_num, self.num_points, 6))
+        next_states = np.zeros((every_epoch_num, 6)),
+        force = np.zeros((every_epoch_num, 6)),
+        pose = np.zeros((every_epoch_num, 7))
+
+        time_cumsum = np.cumsum(time_array)
+        joint_indices = []
+        for i in range(self.numjoint):
+            joint_info = p.getJointInfo(self.ur5_id, i)
+            if joint_info[2] != p.JOINT_FIXED:  # 过滤掉固定关节
+                joint_indices.append(i)
+        joint_position = [p.getJointState(self.ur5_id, i)[0] for i in joint_indices]
+
+        for i, timei in enumerate(times):
+            for j in range(len(time_cumsum)):
+                if timei < time_cumsum[j]:
+                    planner_interpolate = planner_array[j - 1].interpolate(timei - time_cumsum[j - 1])
+                    target_t = planner_interpolate.t
+                    target_r = planner_interpolate.R
+                    target_r = get_quaternion_from_matrix(target_r)
+
+                    target_r_xyzw = self.shift_array(list(target_r))
+                    # ------------------------------------------求解器-------------------------------------------------------
+                    self.target_joint_angles = p.calculateInverseKinematics(
+                                                        bodyUniqueId=self.ur5_id,
+                                                        endEffectorLinkIndex=7,
+                                                        targetPosition=target_t,
+                                                        targetOrientation=target_r_xyzw,
+                                                        restPoses=joint_position,
+                                                        jointDamping = [0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+                                                        physicsClientId=self.physicsClient_use)
+
+                    joint_position = self.target_joint_angles
+                    break
+
+            desired_poses[i, :] = joint_position
+            """ test desired_pose """
+            self.real_robot_connect.movej(joint_position)
+            # self.control_jointsArray_to_target(self.ur5_id, list(desired_poses[i, :]),
+            #                                    joint_indices, physicsClientId=self.physicsClient_use)
+            """ test desired_pose """
+
+        data_num = 0
+        time_num = 0
+        force_step = 0
+        while p.isConnected():
+            step_start = time.time()
+
+            if time_num % every_step_num == 0:
+                joints_info = self.setup_control_joint(self.ur5_id, self.robot_control_joint_name)
+                robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+                # robot_state_transition = self.Visualize_rotation_center(robot_state_position[4], robot_state_position[5],
+                #                                                         relative_offset=[0.055, 0, 0], UI=False)
+                joint_state = robot_state_position[0]
+
+                # joint_state, _, _ = self.getJointStates(self.ur5_id, self.control_joint_ids)
+                self.control_joints_to_target(self.ur5_id_plan, list(desired_poses[time_num, :]), self.control_joint_ids, physicsClientId=self.physicsClient_plan)
+                robot_position_plan = p.getLinkState(self.ur5_id_plan, self.ur5EndEffectorIndex, computeForwardKinematics=1, physicsClientId=self.physicsClient_plan)
+                # robot_transition_plan = self.Visualize_rotation_center(robot_position_plan[4], robot_position_plan[5],
+                #                                                        relative_offset=[0.055, 0, 0], UI=False)
+                FT = self.getForceTorque()
+                if FT[0] > 1:
+                    print("ft")
+                if self.pre_orie == [0.0, 0.0, 0.0, 0.0]:
+                    self.pre_orie = robot_state_position[1]
+                if time_num > record_time_num:
+
+                    current_force = np.array([FT[0], FT[1], FT[2]])
+                    print(current_force)
+                    Fext = [FT[0], FT[1], FT[2]]
+                    Text = [FT[3], FT[4], FT[5]]
+                    force_torque_base = self.cart_to_base_force_torque(np.array(Fext), np.array(Text),
+                                                                       robot_state_position[0], robot_state_position[1])
+                    self.force_x = Fext[0]
+                    self.force_y = Fext[1]
+                    self.force_z = Fext[2]
+
+                    self.Torque_x = Text[0]
+                    self.Torque_y = Text[1]
+                    self.Torque_z = Text[2]
+                    self.writer.add_scalars("force_x",
+                                            {"force_x": self.force_x}, force_step)
+                    self.writer.add_scalars("force_y",
+                                            {"force_y": self.force_y}, force_step)
+                    self.writer.add_scalars("force_z",
+                                            {"force_z": self.force_z}, force_step)
+                    self.writer.add_scalars("Torque_x",
+                                            {"Torque_x": self.Torque_x}, force_step)
+                    self.writer.add_scalars("Torque_y",
+                                            {"Torque_y": self.Torque_y}, force_step)
+                    self.writer.add_scalars("Torque_z",
+                                            {"Torque_z": self.Torque_z}, force_step)
+                    force_step += 1
+                    if max(abs(current_force)) < 1e-3:
+                        break
+                    current_torque = np.array([FT[3], FT[4], FT[5]])
+                    current_orie = robot_state_position[1]
+                    current_angles = R.from_quat(current_orie).as_euler('xyz', degrees=True)
+                    # 构建状态向量
+                    current_state = np.concatenate([current_orie, current_force])
+
+
+                    current_orie_matrix = Rotation.from_quat(current_orie).as_matrix()
+                    action_to_target_orie_matrix = Rotation.from_quat(self.pre_orie).as_matrix()
+                    target_orie_inv = action_to_target_orie_matrix.T
+                    quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
+
+                    quat_rot_err_ = Rotation.from_matrix(quat_rot_err_tmp).as_euler('xyz', degrees=True)
+                    quat_rot_err_[2] = 0.0
+                    state = current_state
+                    action = quat_rot_err_
+                    self.pre_orie = current_orie
+
+                    states[data_num, ...] = state
+                    actions[data_num, ...] = action
+                    pose[data_num, ...] = np.concatenate([joint_state, current_orie])
+                data_num += 1
+
+            time_num += 1
+            if time_num >= time_step_num - every_step_num:
+                break
+
+            # self.control_joints_to_target(self.ur5_id, desired_poses[time_num, :], self.control_joint_ids,
+            #                               physicsClientId=self.physicsClient_use)
+            self.control_jointsArray_to_target(self.ur5_id, list(desired_poses[time_num, :]),
+                                               self.control_joint_ids, physicsClientId=self.physicsClient_use)
+            """ draw contact phase result """
+            if time_num > record_time_num:
+                cur_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
+                cur_peg_orie = p.getLinkState(self.ur5_id, 8)[5]
+                if self.prev_pos is not None:
+                    # 绘制线段连接当前位置和上一个位置
+                    p.addUserDebugLine(self.prev_pos, cur_peg_pos,
+                                       lineColorRGB=[0.0, 1.0, 1.0],  # 红色
+                                       lineWidth=4,
+                                       lifeTime=self.trail_duration)
+                else:
+                    self.prev_pos = cur_peg_pos
+
+                self.prev_pos = cur_peg_pos
+                # 关键帧绘制坐标系
+                if time_num % 2 == 0:
+                    self.draw_coordinate_frame(cur_peg_pos, cur_peg_orie, axis_length=0.01, lifetime=0)
+            """ draw contact phase result """
+            time_until_next_step = 1/self._timeStep - (time.time() - step_start)
+            if time_until_next_step > 0:
+                time.sleep(time_until_next_step)
+        # p.disconnect(physicsClientId=self.physicsClient_plan)
+        # p.disconnect(physicsClientId=self.physicsClient_use)
+        print("end")
+        return {
+            'states': states,
+            'actions': actions,
+            'point_clouds': point_clouds,
+            'pose': pose
+            # 'next_states': next_state,
+            # 'force': np.concatenate([current_force, current_torque]),
+            # 'pose': np.concatenate([hole_pose, new_angles])
+        }
+
+    def collect_force_dataset_delta_orien_improv(self, every_epoch_num):
+        # 初始化参数
+        target_angles = np.array([90, 90, -90])  # 目标姿态
+        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+        hole_pose = np.array(self.hole_up_end)
+        # hole_pose[2] += 0.06
+
+        hole_orientation = Rotation.from_euler('xyz', [90, 90, -90], degrees=True).as_quat()  # 默认固定孔的姿态
+        hole_orie = np.array(hole_orientation)
+
+        angles = []
+        angles_select = [-150, -30, 90, 210]
+        for i in range(4):
+            hole_orientation = Rotation.from_euler('xyz', [90, 90, -150+120*i], degrees=True).as_quat()  # 默认固定孔的姿态
+
+            robot_state_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            state_orientation = robot_state_position[1]
+            orientation_err = np.dot(hole_orientation, state_orientation)
+            orien_angle_err = 2*np.arccos(orientation_err)
+            angle_err = orien_angle_err*180/np.pi
+            angles.append(angle_err)
+        angle_target = -30
+        target_angles = [90,90,angle_target]
+        hole_orie = Rotation.from_euler('xyz', [90, 90, angle_target], degrees=True).as_quat()  # 默认固定孔的姿态
+        # robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        # hole_pose = np.array(robot_position[0])
+        # 移动到初始位姿
+        # self.go(hole_pose, hole_orie)
+        self.target_joint = p.calculateInverseKinematics(
+            bodyUniqueId=self.ur5_id,
+            endEffectorLinkIndex=7,
+            targetPosition=list(hole_pose),
+            targetOrientation=list(hole_orie),
+            jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+            physicsClientId=self.physicsClient_use)
+
+        # self.control_jointsArray_to_target(self.ur5_id, list(self.target_joint),
+        #                                    [1,2,3,4,5,6], physicsClientId=self.physicsClient_use)
+        self.control_joints_to_target(self.ur5_id, list(self.target_joint),
+                                      [1, 2, 3, 4, 5, 6], physicsClientId=self.physicsClient_use)
+
+        # 移动到初始插接位姿
+        init_insert_depth = np.random.uniform(0.01, 0.04)
+        hole_pose[2] = hole_pose[2] - init_insert_depth  # 孔深度0.08
+        self.go(hole_pose, hole_orie)
+        FT = self.getForceTorque()
+        Fext = [FT[0], FT[1], FT[2]]
+        print("force : ", Fext)
+
+        # 数据存储结构优化
+        state_dim = 6  # 当前姿态误差(3) + 当前力/力矩(3)
+        action_dim = 3  # 姿态调整量(delta_x, delta_y, delta_z)
+
+        dataset = {
+            'states': np.zeros((every_epoch_num, state_dim)),
+            'actions': np.zeros((every_epoch_num, action_dim)),
+            'next_states': np.zeros((every_epoch_num, state_dim)),
+            'force': np.zeros((every_epoch_num, state_dim)),
+            'pose': np.zeros((every_epoch_num, state_dim))
+        }
+
+        # 初始随机姿态
+        # 初始随机姿态（x在80-88或92-100，y在80-88或92-100，z固定-90）
+        current_angles = np.array([
+            np.random.choice([
+                np.random.uniform(90-5*1/(init_insert_depth*100), 89),
+                np.random.uniform(91, 90+5*1/(init_insert_depth*100))
+            ]),
+            np.random.choice([
+                np.random.uniform(90-5*1/(init_insert_depth*100), 89),
+                np.random.uniform(91, 90+5*1/(init_insert_depth*100))
+            ]),
+            angle_target  # z固定
+        ])
+
+        # 动态步长参数
+        base_step = 0.2
+        min_step = 0.1
+        step_decay = 0.9
+
+        for step in range(every_epoch_num):
+            # 计算当前状态
+            angle_error = current_angles - target_angles
+            current_quat = Rotation.from_euler('xyz', current_angles, degrees=True).as_quat()
+
+            # 获取当前力反馈
+            self.go(hole_pose, current_quat)
+            FT = self.getForceTorque()
+            current_force = np.array([FT[0], FT[1], FT[2]])
+            current_torque = np.array([FT[3], FT[4], FT[5]])
+
+            # 构建状态向量
+            current_state = np.concatenate([current_angles, current_force])
+
+            # 智能生成动作（姿态调整量）
+            angle_error_magnitude = np.linalg.norm(angle_error[:2])  # 只考虑x,y
+            adaptive_step = max(min_step, base_step * (step_decay ** (angle_error_magnitude / 10)))
+
+            # 核心改进：生成训练所需的delta_orientation
+            delta_angles = np.zeros(3)
+            for i in range(2):  # 只调整x,y
+                if angle_error[i] > 0:
+                    delta_angles[i] = -adaptive_step
+                else:
+                    delta_angles[i] = adaptive_step
+
+            # 添加探索噪声
+            if np.random.rand() < 0.3:
+                delta_angles[:2] += np.random.uniform(-0.5, 0.5, size=2)
+
+            # 执行动作
+            new_angles = current_angles + delta_angles
+            new_angles = np.clip(new_angles, [80, 80, angle_target], [100, 100, angle_target])
+
+            # 获取新状态
+            new_quat = Rotation.from_euler('xyz', new_angles, degrees=True).as_quat()
+            self.go(hole_pose, new_quat)
+            new_FT = self.getForceTorque()
+            force_magnitude = np.linalg.norm(new_FT[:3])
+
+            new_force = np.array([new_FT[0], new_FT[1], new_FT[2]])
+            new_angle_error = new_angles - target_angles
+            next_state = np.concatenate([new_angle_error, new_force])
+
+            print(
+                f"Current angles (x, y, z): [{new_angles[0]:.1f}, {new_angles[1]:.1f}, {new_angles[2]:.1f}] | "
+                f"Delta angles (x, y, z): [{delta_angles[0]:.1f}, {delta_angles[1]:.1f}, {delta_angles[2]:.1f}] | "
+                f"Force: {new_force} | Magnitude: {force_magnitude:.3f}"
+            )
+
+            # 存储transition
+            dataset['states'][step] = current_state
+            dataset['actions'][step] = delta_angles
+            dataset['next_states'][step] = next_state
+            dataset['force'][step] = np.concatenate([current_force, current_torque])
+            dataset['pose'][step] = np.concatenate([hole_pose, new_angles])
+
+            # 更新状态
+            current_angles = new_angles
+
+            # 终止条件
+            if np.linalg.norm(new_force) < 0.1:
+                break
+
+        # 裁剪未使用的数据
+        # for k in dataset:
+        #     dataset[k] = dataset[k][:step + 1]
+
+        return dataset
+
+    def getForceTorque(self):
+        """
+        获取机器人当前关节力/力矩
+        """
+        FT = []
+        force = np.array(p.getJointState(self.ur5_id, 7)[2][0:3], dtype=float).reshape(3, 1)
+        torque = np.array(p.getJointState(self.ur5_id, 7)[2][3:6], dtype=float).reshape(3, 1)
+        FT = [force[0][0], force[1][0], force[2][0], torque[0][0], torque[1][0], torque[2][0]]
+        return FT
+
+    def go(self, target_pos, target_orie):
+        self.target_joint = p.calculateInverseKinematics(
+            bodyUniqueId=self.ur5_id,
+            endEffectorLinkIndex=7,
+            targetPosition=list(target_pos),
+            targetOrientation=list(target_orie),
+            jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+            physicsClientId=self.physicsClient_use)
+        self.control_joints_to_target(self.ur5_id, list(self.target_joint),
+                                      [1, 2, 3, 4, 5, 6], physicsClientId=self.physicsClient_use)
+
+    def go_real(self, target_pos, target_orie):
+        # ------------------------------------------求解器-------------------------------------------------------
+        self.target_robot_joint_angles = p.calculateInverseKinematics(
+            bodyUniqueId=self.ur5_id,
+            endEffectorLinkIndex=7,
+            targetPosition=target_pos,
+            targetOrientation=target_orie,
+            jointDamping=self.joint_damping, )
+
+        p.setJointMotorControlArray(self.ur5_id, [1, 2, 3, 4, 5, 6],
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=list(self.target_robot_joint_angles),
+                                    forces=np.array([87.0, 87.0, 87.0, 87.0, 60, 60]))
+        self.real_robot_connect.movej(self.target_robot_joint_angles)
+        # ----------------------将更新频率设置为真实频率---------------------
+        p.setTimeStep(1.0 / self._timeStep)
+        for _ in range(30):
+            p.stepSimulation()
+
+    def step(self, action):
+        dt = 1.0 / self._timeStep
+        n_steps = self._timeStep // self.control_hz
+        if action is not None:
+            self.latest_action = action
+            # 计算当前状态
+            robot_state = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+            end_orn_euler = R.from_quat(robot_state[1]).as_euler('xyz', degrees=True)
+            robot_state_position = np.array(robot_state[0])
+            action[2] = 0.0
+            new_state_euler = end_orn_euler + action / 1
+            action_quat = Rotation.from_euler('xyz', new_state_euler, degrees=True).as_quat()
+            self.step_FT = self.getForceTorque()
+            Fext = [self.step_FT[0], self.step_FT[1], self.step_FT[2]]
+            Text = [self.step_FT[3], self.step_FT[4], self.step_FT[5]]
+            # 获取当前的关节状态
+            self.current_Position = p.getLinkState(self.ur5_id, 7, physicsClientId=self.physicsClient_use)[4]
+            self.current_Orientation = np.array(p.getLinkState(self.ur5_id, 7, physicsClientId=self.physicsClient_use)[5])
+            force_torque_base = self.cart_to_base_force_torque(np.array(Fext), np.array(Text), self.current_Position,
+                                                               self.current_Orientation)
+            self.force_x = force_torque_base[0][0]
+            self.force_y = force_torque_base[0][1]
+            self.force_z = force_torque_base[0][2]
+
+            self.Torque_x = force_torque_base[1][0]
+            self.Torque_y = force_torque_base[1][1]
+            self.Torque_z = force_torque_base[1][2]
+            current_force = np.array([self.step_FT[0], self.step_FT[1], self.step_FT[2]])
+            print("---- force ---", current_force)
+            if np.linalg.norm(current_force) < 1:
+                robot_state_position[2] -= 0.002
+
+            for i in range(n_steps):
+                # ------------------------------------------求解器-------------------------------------------------------
+
+                self.target_joint = p.calculateInverseKinematics(
+                    bodyUniqueId=self.ur5_id,
+                    endEffectorLinkIndex=7,
+                    targetPosition=robot_state_position,
+                    targetOrientation=list(action_quat),
+                    jointDamping=[0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001],
+                    physicsClientId=self.physicsClient_use)
+
+                # self.control_jointsArray_to_target(self.ur5_id, list(self.target_joint),
+                #                                    [1,2,3,4,5,6], physicsClientId=self.physicsClient_use)
+                self.control_joints_to_target(self.ur5_id, list(self.target_joint),
+                                                   [1,2,3,4,5,6], physicsClientId=self.physicsClient_use)
+
+
+        observation = self.get_observation()
+        reward = 1
+        done = False
+        info = None
+
+        return observation, reward, done, info
+
+    def shift_array(self, arr):
+        if len(arr) <= 1:
+            return arr
+        first_ele = arr.pop(0)
+        arr.append(first_ele)
+
+        return arr
+
+    def setup_control_joint(self, robotID, ControlJoints):
+        jointTypeList = ["REVOLUTE", "PRISMATIC", "SPHERICAL", "PLANAR", "FIXED"]
+        numJoints = p.getNumJoints(robotID)
+        jointInfo = namedtuple("jointInfo",
+                               ["id", "name", "type", "lowerLimit", "upperLimit", "maxForce", "maxVelocity",
+                                "controllable"])
+        self.joints = AttrDict()
+        self.control_joint_ids = []
+        for i in range(numJoints):
+            info = p.getJointInfo(robotID, i)
+            jointID = info[0]
+            jointName = info[1].decode("utf-8")
+            jointType = jointTypeList[info[2]]
+            jointLowerLimit = info[8]
+            jointUpperLimit = info[9]
+            jointMaxForce = info[10]
+            jointMaxVelocity = info[11]
+            controllable = True if jointName in ControlJoints else False
+            self.controlJointsInfo = jointInfo(jointID, jointName, jointType, jointLowerLimit,
+                                               jointUpperLimit, jointMaxForce, jointMaxVelocity, controllable)
+            # if info.type == "REVOLUTE":  # set revolute joint to static
+            #     p.setJointMotorControl2(robotID, info.id, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
+            self.joints[self.controlJointsInfo.name] = self.controlJointsInfo
+            if controllable:
+                self.control_joint_ids.append(self.controlJointsInfo[0])
+
+        return self.joints
+
+    def control_joints_to_target(self, robotID, jointPose, Jointindex, physicsClientId):
+        j = 0
+        for i in Jointindex:
+            forcemaxforce = 500
+            p.setJointMotorControl2(bodyUniqueId=robotID,
+                                    jointIndex=i,
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPosition=jointPose[j],
+                                    targetVelocity=0.0,
+                                    force=forcemaxforce,
+                                    maxVelocity=1,
+                                    positionGain=0.03,
+                                    velocityGain=1,
+                                    physicsClientId = physicsClientId)
+            j = j+1
+        self.wait_n_steps(240, physicsClientId)
+
+    def control_jointsArray_to_target(self, robotID, pose_array, Jointindex, physicsClientId):
+        p.setJointMotorControlArray(robotID, Jointindex,
+                                    controlMode=p.POSITION_CONTROL,
+                                    targetPositions=pose_array,
+                                    forces=np.array([87.0, 87.0, 87.0, 87.0, 60, 60]),
+                                    physicsClientId = physicsClientId
+                                    )
+        p.setTimeStep(1.0 / self._timeStep)
+        self.wait_n_steps(10, physicsClientId)
+
+    def wait_n_steps(self, n: int, physicsClientId):
+        for i in range(n):
+            p.stepSimulation(physicsClientId = physicsClientId)
+
+    def getJointStates(self, robotID, control_joint_index):
+        joint_states = p.getJointStates(robotID, control_joint_index)
+        joint_positions = [state[0] for state in joint_states]
+        joint_velocities = [state[1] for state in joint_states]
+        joint_torques = [state[3] for state in joint_states]
+        return joint_positions, joint_velocities, joint_torques
+
+    def uniform_sampling(self, point_cloud, filter_depth):
+        condition = point_cloud[:, 2] < filter_depth
+        filtered_points = point_cloud[condition, :]
+        indices = np.random.permutation(filtered_points.shape[0])[:self.num_points]
+        sampled_points = filtered_points[indices, :]
+        return sampled_points
+
+    def cal_planner(self, t0, R0, t1, R1, time):
+        position_parameter = LinePositionParameter(t0, t1)
+        attitude_parameter = OneAttitudeParameter(R0, R1)
+        cartesian_parameter = CartesianParameter(position_parameter, attitude_parameter)
+        velocity_parameter = QuinticVelocityParameter(time)
+        trajectory_parameter = TrajectoryParameter(cartesian_parameter, velocity_parameter)
+        trajectory_planner = TrajectoryPlanner(trajectory_parameter)
+        return trajectory_planner
+
+    def get_observation(self):
+        frames = self.cam_system()
+        images = []
+
+        for k, v in frames.items():
+            self.latest[k] = v
+        for k, v in self.latest.items():
+            if 'color' in k:
+                disp = cv2.resize(v, (self.IMG_WIDTH, self.IMG_HEIGHT))
+                label = "Front RGB" if "front" in k else "Right RGB"
+                cv2.putText(disp, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                images.append(disp)
+            if 'depth' in k:
+                norm = np.clip(v / self.Z_FAR, 0, 1)
+                dcol = cv2.applyColorMap((norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                dcol = cv2.resize(dcol, (self.IMG_WIDTH, self.IMG_HEIGHT))
+                label = "Front Depth" if "front" in k else "Right Depth"
+                cv2.putText(dcol, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                images.append(dcol)
+        if images:
+            cv2.imwrite("./eye_in_hand_rgb.jpg", images[0])
+            cv2.imwrite("./eye_in_hand_depth.jpg", images[1])
+
+        self.camera_Position = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[0]
+        self.camera_Orientation = p.getLinkState(self.ur5_id, 10, computeForwardKinematics=1)[1]
+        # self.goalPosition1.update(self.camera_Position, self.camera_Orientation)
+        self.cube_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+        self.camera_in_world = [-0.6, 0.2, 0.7]
+        self.view_matrix = p.computeViewMatrix(cameraEyePosition = [self.camera_in_world[0],
+                                                                self.camera_in_world[1],
+                                                                self.camera_in_world[2]],
+                                            cameraTargetPosition = [self.cube_position[0],
+                                                                    self.cube_position[1],
+                                                                    self.cube_position[2]],
+                                            cameraUpVector = [0, 0, 1])
+
+        # intrinsics of the camera
+        self.fov = 80
+        aspect = float(self.image_width / self.image_height)
+        near = 0.001
+        far = 200.0
+        self.camera_matrix = np.array([
+            [self.image_height / (2.0 * np.tan(self.fov / 2.0)), 0.0, self.image_width / 2.0],
+            [0.0, self.image_height / (2.0 * np.tan(self.fov / 2.0)), self.image_height / 2.0],
+            [0.0, 0.0, 1.0]
+        ])
+        self.camera_matrix_inv = np.linalg.inv(self.camera_matrix)
+
+        self.proj_matrix = p.computeProjectionMatrixFOV(self.fov, aspect, near, far)
+
+        images = p.getCameraImage(width = self.image_width,
+                                    height = self.image_height,
+                                    viewMatrix = self.view_matrix,
+                                    projectionMatrix = self.proj_matrix,
+                                    renderer=p.ER_BULLET_HARDWARE_OPENGL)
+        assert (images[0] == self.image_width)
+        assert (images[1] == self.image_height)
+        rgb_image = np.reshape(images[2], (self.image_height, self.image_width, 4)) * 1. / 255.
+        rgb_image_3_channel = np.uint8(rgb_image[:, :, :3] * 255)
+
+        rgb_image = rgb_image[:, :, :3].astype(np.float32)
+        obs_image = np.uint8(cv2.cvtColor(rgb_image, cv2.COLOR_RGB2GRAY) * 255)
+        gray_image = np.expand_dims(obs_image, axis=2)
+        assert (rgb_image.shape == (self.image_height, self.image_width, 3))
+        assert (gray_image.shape == (self.image_height, self.image_width, 1))
+
+        depth_buffer = np.reshape(images[3], [self.image_height, self.image_width])
+        depth_image = far * near / (far - (far - near) * depth_buffer)
+
+        seg_image = np.reshape(images[4], [self.image_height, self.image_width]) * 1. / 255.
+
+        depth_image_uint8 = np.uint8(depth_image * (1. / depth_image.max()) * 255.)
+
+        depth_image_uint8 = np.expand_dims(depth_image_uint8, axis=2)
+        assert (depth_image_uint8.shape == (self.image_height, self.image_width, 1))
+        depth_image_3_channel = np.concatenate((depth_image_uint8, depth_image_uint8, depth_image_uint8), axis=2)
+        assert (rgb_image_3_channel.shape == (self.image_height, self.image_width, 3))
+
+        """ save images """
+        cv2.imwrite("./eye_in_hand_rgb.jpg", rgb_image_3_channel)
+        cv2.imwrite("./eye_in_hand_depth.jpg", depth_image_uint8)
+
+        """ the observation can be changed to perform ablative studies"""
+
+        point_cloud = np.zeros((self.image_height * self.image_width, 6))
+        for h in range(self.image_height):
+            for w in range(self.image_width):
+                point_cloud[h * self.image_width + w, :3] = self.camera_matrix_inv @ np.array(
+                    [w * 1.0, h * 1.0, 1.0]) * depth_image[h, w]
+                point_cloud[h * self.image_width + w, 3:] = rgb_image_3_channel[h, w, :]
+        sampled_points = self.uniform_sampling(point_cloud, 0.8)
+
+        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        # peg_transition = self.Visualize_rotation_center(robot_position[4], robot_position[5], relative_offset=[0.055, 0, 0], UI=False)
+        self.peg_position = np.array(robot_position[0])
+        self.peg_orientation = np.array(robot_position[1])
+        end_orn_euler = R.from_quat(robot_position[1]).as_euler('xyz', degrees=True)
+        FT = self.getForceTorque()
+        current_force = np.array([FT[0], FT[1], FT[2]])
+        # 构建状态向量
+        current_state = np.concatenate([self.peg_orientation, current_force])
+        obs = {
+            'agent_pos': current_state,
+        }
+
+        return obs
+
+    def distance_to_goal(self):
+        res = np.zeros(3)
+        robot_position = p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex, computeForwardKinematics=1)
+        peg_position = self.Visualize_rotation_center(robot_position[4], robot_position[5], relative_offset=[0.055, 0, 0], UI=False)[0]
+        hole_position = p.getBasePositionAndOrientation(self.tool_id[0])[0]
+
+        robot_peg = np.array(peg_position)
+        hole = np.array(hole_position)
+
+        hole[2] = hole[2]- 0.08 # 孔深度0.08
+        res[0] = np.abs(robot_peg[0] - hole[0])
+        res[1] = np.abs(robot_peg[1] - hole[1])
+        res[2] = np.linalg.norm(robot_peg - hole)
+        return res
+
+    def distance_to_goal_rotation(self):
+        quat_rot_err = np.zeros(4)
+        orientation_err = np.zeros(4)
+
+        robot_orientation = np.array(p.getLinkState(self.ur5_id, self.ur5EndEffectorIndex)[5])
+        hole_orientation = Rotation.from_euler('xyz', [90, 90, -90], degrees=True).as_quat() # 默认固定孔的姿态
+
+        # if np.dot(np.transpose(hole_orientation), robot_orientation) < 0.0:
+        #     robot_orientation = -robot_orientation
+
+        hole_orientation = Rotation.from_euler('xyz', [90, 90, -90], degrees=True).as_matrix() # 默认固定孔的姿态
+
+        current_orie_matrix = Rotation.from_quat(robot_orientation).as_matrix()
+        target_orie_inv = hole_orientation.T
+        quat_rot_err_tmp = np.dot(current_orie_matrix, target_orie_inv)
+        
+        # ------ 轴角表示误差，不准 ------
+        # quat_rot_err_tmp = Rotation.from_matrix(quat_rot_err_tmp).as_quat()
+        # np.copyto(quat_rot_err, quat_rot_err_tmp)
+
+        # if np.linalg.norm(quat_rot_err) > 1e-3:
+        #     quat_rot_err = quat_rot_err / np.linalg.norm(quat_rot_err)
+        # axis, angle = tfs.quaternions.quat2axangle(quat_rot_err) # 创建一个四元数
+        # rotation_err = axis * angle
+        # ------ 轴角表示误差，不准 ------
+
+        rotation_err = Rotation.from_matrix(quat_rot_err_tmp).as_rotvec()
+
+        orientation_err[0] = rotation_err[0]
+        orientation_err[1] = rotation_err[1]
+        # 将角度归一化到 [0, 2π) 范围内
+        orientation_err[2] = rotation_err[2]
+
+        return np.linalg.norm(orientation_err)
+
+    def Visualize_rotation_center(self, end_pos, end_orn, relative_offset=[0.055, 0, 0], UI=True):
+        """
+           目的：可视化固定点旋转,并返回固定点位姿
+           Arguments:
+           - end_pos: len=3, 该 link 的在世界坐标系的位置
+           - end_orn: len=4, 该 link 的在世界坐标系的姿态 (x, y, z, w)
+           - relative_offset 该 link下的相对移动 list of 
+           - relative_euler  该 link下的旋转  list of 3
+
+           Returns:
+           - [peg_link_pos,peg_link_Quaternion]
+           """
+        # 将eelink变换到peg末端，可视化坐标系
+        peg_link_Rotation_matrix = relative_pos_and_ore_form_world(end_pos, end_orn,
+                                                                   [relative_offset[0], relative_offset[1],
+                                                                    relative_offset[2]], [0, 0, 0])
+        peg_link_Quaternion = Rotation.from_matrix(peg_link_Rotation_matrix[:3, :3]).as_quat()
+        peg_link_pos = peg_link_Rotation_matrix[:3, -1]
+        if UI == True:
+            self.Visualize_rotation_center_UI.update(peg_link_pos, peg_link_Quaternion)
+
+        return [peg_link_pos, peg_link_Quaternion]
+
+    def draw_coordinate_frame(self, pos, orn, axis_length, lifetime):
+        rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+        axes = [
+            (pos, pos + rot_matrix[:, 0] * axis_length, [1, 0, 0]),  # X
+            (pos, pos + rot_matrix[:, 1] * axis_length, [0, 1, 0]),  # Y
+            (pos, pos + rot_matrix[:, 2] * axis_length, [0, 0, 1])  # Z
+        ]
+        for start, end, color in axes:
+            p.addUserDebugLine(start, end, color, lineWidth=1, lifeTime=lifetime)

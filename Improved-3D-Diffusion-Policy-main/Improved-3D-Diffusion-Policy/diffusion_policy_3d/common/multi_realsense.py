@@ -7,10 +7,15 @@ import pyrealsense2 as rs
 from multiprocessing import Process, Pipe, Queue, Event
 import time
 import multiprocessing
+from matplotlib.animation import FuncAnimation
 multiprocessing.set_start_method('fork')
 
 np.printoptions(3, suppress=True)
 
+rgb_h = 480
+rgb_w = 640
+depth_h = 480
+depth_w = 640
 def get_realsense_id():
     ctx = rs.context()
     devices = ctx.query_devices()
@@ -36,10 +41,10 @@ def init_given_realsense(
         #     Depth         1024x768      @ 30Hz     Z16
         # Depth         640x480       @ 30Hz     Z16
         # Depth         320x240       @ 30Hz     Z16
-        h, w = 768, 1024
+        h, w = depth_h, depth_w
         config.enable_stream(rs.stream.depth, w, h, rs.format.z16, 30)
     if enable_rgb:
-        h, w = 540, 960
+        h, w = rgb_h, rgb_w
         config.enable_stream(rs.stream.color, w, h, rs.format.rgb8, 30)
 
     config.resolve(pipeline)
@@ -48,26 +53,18 @@ def init_given_realsense(
 
     if enable_depth:
 
-        # Get the depth sensor (or any other sensor you want to configure)
-        device = profile.get_device()
-        depth_sensor = device.query_sensors()[0]
+        depth_sensor = profile.get_device().first_depth_sensor()
+        depth_scale = depth_sensor.get_depth_scale()
+        align = rs.align(rs.stream.color)  # 如果分辨率一致可改为 rs.align(rs.stream.depth)
 
-        # Set the inter-camera sync mode
-        # Use 1 for master, 2 for slave, 0 for default (no sync)
-        depth_sensor.set_option(rs.option.inter_cam_sync_mode, sync_mode)
-        
-        # set min distance
-        depth_sensor.set_option(rs.option.min_distance, 0.05)
-        
-        # get depth scale
-        depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-        align = rs.align(rs.stream.color)
-        
-        depth_profile = profile.get_stream(rs.stream.depth)
-        intrinsics = depth_profile.as_video_stream_profile().get_intrinsics()
-        camera_info = CameraInfo(intrinsics.width, intrinsics.height, intrinsics.fx, intrinsics.fy, intrinsics.ppx, intrinsics.ppy)
-        
-        print("camera {} init.".format(device))
+        # 多机同步和min_distance设置（除非需要）
+        # depth_sensor.set_option(rs.option.inter_cam_sync_mode, sync_mode)
+        # depth_sensor.set_option(rs.option.min_distance, 0.05)
+
+        # 获取相机内参（仅用于点云生成）
+        intrinsics = profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
+        camera_info = CameraInfo(intrinsics.width, intrinsics.height, intrinsics.fx, intrinsics.fy, intrinsics.ppx,
+                                 intrinsics.ppy)
         return pipeline, align, depth_scale, camera_info
     else:
         print("camera {} init.".format(device))
@@ -165,7 +162,7 @@ class SingleVisionProcess(Process):
             
             if self.enable_pointcloud:
                 # Nx6
-                point_cloud_frame = self.create_colored_point_cloud(color_frame, depth_frame, 
+                point_cloud_frame = self.create_colored_point_cloud(color_frame, depth_frame,
                             far=self.z_far, near=self.z_near, num_points=self.num_points)
             else:
                 point_cloud_frame = None
@@ -255,8 +252,8 @@ class MultiRealSense(object):
 
         self.devices = get_realsense_id()
     
-        self.front_queue = Queue(maxsize=3)
-        self.right_queue = Queue(maxsize=3)
+        self.front_queue = Queue(maxsize=30)
+        self.right_queue = Queue(maxsize=30)
 
       
         # 0: f1380328, 1: f1422212
@@ -265,12 +262,12 @@ class MultiRealSense(object):
 
         if use_front_cam:
             self.front_process = SingleVisionProcess(self.devices[front_cam_idx], self.front_queue,
-                            enable_rgb=True, enable_depth=True, enable_pointcloud=True, sync_mode=1,
+                            enable_rgb=True, enable_depth=True, enable_pointcloud=True, sync_mode=0,
                             num_points=front_num_points, z_far=front_z_far, z_near=front_z_near, 
                             use_grid_sampling=use_grid_sampling, img_size=img_size)
         if use_right_cam:
             self.right_process = SingleVisionProcess(self.devices[right_cam_idx], self.right_queue,
-                    enable_rgb=True, enable_depth=True, enable_pointcloud=True, sync_mode=1,
+                    enable_rgb=True, enable_depth=True, enable_pointcloud=True, sync_mode=0,
                         num_points=right_num_points, z_far=right_z_far, z_near=right_z_near, 
                         use_grid_sampling=use_grid_sampling,  img_size=img_size)
 
@@ -307,22 +304,56 @@ class MultiRealSense(object):
 
     def __del__(self):
         self.finalize()
-        
+
 
 if __name__ == "__main__":
-    cam = MultiRealSense(use_right_cam=False, front_num_points=20000, use_grid_sampling=True)
+    cam = MultiRealSense(use_right_cam=True, front_num_points=20000, use_grid_sampling=True)
     import matplotlib.pyplot as plt
+
+    # 启用Matplotlib交互模式
+    plt.ion()
+
+    # 创建 2x2 的子图布局（左彩色、左深度、右彩色、右深度）
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 8))
+
+    # 初始化图像
+    left_color_plot = ax1.imshow(np.zeros((rgb_h, rgb_w, 3), dtype=np.uint8))
+    left_depth_plot = ax2.imshow(np.zeros((depth_h, depth_w), dtype=np.uint8), cmap='jet')
+    right_color_plot = ax3.imshow(np.zeros((rgb_h, rgb_w, 3), dtype=np.uint8))
+    right_depth_plot = ax4.imshow(np.zeros((depth_h, depth_w), dtype=np.uint8), cmap='jet')
+
+    # 设置标题
+    ax1.set_title("Left Color")
+    ax2.set_title("Left Depth")
+    ax3.set_title("Right Color")
+    ax4.set_title("Right Depth")
+
+    plt.tight_layout()  # 自动调整子图间距
+    plt.show()
+
     while True:
         out = cam()
-        print(out.keys())
-    
-        imageio.imwrite(f'color_front.png', out['front_color'])
-        # imageio.imwrite(f'color_right.png', out['right_color'])
-        # imageio.imwrite(f'depth_right.png', out['right_depth'])
-        # imageio.imwrite(f'depth_front.png', out['right_front'])
-        # plt.imshow(out['front_depth'])
-        # plt.savefig("front_depth.png")
-        import visualizer
-        # visualizer.visualize_pointcloud(out['right_point_cloud'])
-        visualizer.visualize_pointcloud(out['front_point_cloud'])
-        cam.finalize()
+
+        # 更新左相机图像
+        left_color_plot.set_array(out['color'])
+        left_depth_colormap = cv2.normalize(
+            out['depth'], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U
+        )
+        left_depth_colormap = cv2.applyColorMap(left_depth_colormap, cv2.COLORMAP_JET)[:, :, ::-1]
+        left_depth_plot.set_array(left_depth_colormap)
+
+        # 更新右相机图像
+        right_color_plot.set_array(out['right_color'])
+        right_depth_colormap = cv2.normalize(
+            out['right_depth'], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U
+        )
+        right_depth_colormap = cv2.applyColorMap(right_depth_colormap, cv2.COLORMAP_JET)[:, :, ::-1]
+        right_depth_plot.set_array(right_depth_colormap)
+
+        # 强制刷新界面
+        fig.canvas.flush_events()
+
+        # 按ESC键退出
+        if plt.waitforbuttonpress(0.001):
+            if plt.gcf().canvas.key_press_event.key == 'escape':
+                break

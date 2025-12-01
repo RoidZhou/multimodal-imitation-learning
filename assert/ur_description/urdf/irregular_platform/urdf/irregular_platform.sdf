@@ -1,0 +1,36 @@
+<sdf version='1.7'>
+  <model name='irregular_workbench'>
+    <link name='base_link'>
+      <inertial>
+        <pose>-4.2e-05 0.026968 4.2e-05 0 -0 0</pose>
+        <mass>0.456934</mass>
+        <inertia>
+          <ixx>0.000381736</ixx>
+          <ixy>2.49828e-07</ixy>
+          <ixz>-1.02875e-07</ixz>
+          <iyy>0.000787887</iyy>
+          <iyz>-2.49828e-07</iyz>
+          <izz>0.000710146</izz>
+        </inertia>
+      </inertial>
+      <collision name='base_link_collision'>
+        <pose>0 0 0 0 -0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>/home/zhou/autolab/imitation_learning_idp3/assert/ur_description/urdf/irregular_platform/meshes/base_link.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+      <visual name='base_link_visual'>
+        <pose>0 0 0 0 -0 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>/home/zhou/autolab/imitation_learning_idp3/assert/ur_description/urdf/irregular_platform/meshes/base_link.STL</uri>
+          </mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>

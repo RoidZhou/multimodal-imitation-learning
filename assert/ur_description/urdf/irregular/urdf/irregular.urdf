@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="irregular">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.000471533743886664 0.000471533743886665 0.0205221327428395"
+        rpy="0 0 0" />
+      <mass
+        value="0.0406560209567301" />
+      <inertia
+        ixx="9.0494324346721E-06"
+        ixy="-9.30310743710379E-08"
+        ixz="1.00096427449068E-08"
+        iyy="9.04943243467211E-06"
+        iyz="1.00096427449068E-08"
+        izz="6.57183212341783E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://irregular/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://irregular/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+</robot>
