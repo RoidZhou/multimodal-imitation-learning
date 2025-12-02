@@ -53,7 +53,7 @@ def sort_log_paths(paths, prefix='force'):
     return sorted(paths, key=get_priority)
 
 # Find TensorBoard log files
-path = '/home/zhou/autolab/imitation_learning_idp3/HDQN_peg/evaluation-plots/data/experimental_result_contact/HDQN/circle'
+path = '/home/zhou/autolab/imitation_learning_idp3/HDQN_peg/evaluation-plots/data/experimental_result_contact/HDQN/irregular'
 force_log_paths = sort_log_paths(glob.glob(os.path.join(path, 'force/*')), prefix='f')
 torque_log_paths = sort_log_paths(glob.glob(os.path.join(path, 'torque/*')), prefix='t')
 
@@ -102,10 +102,10 @@ print(f"torque_logs step dtype: {torque_logs['step'].dtype}")
 # Filter specific metrics and steps (20 to 150)
 force_metrics = ['force_x', 'force_y', 'force_z']
 torque_metrics = ['Torque_x', 'Torque_y', 'Torque_z']
-agg_force_logs = force_logs[force_logs['metric'].isin(force_metrics) & force_logs['step'].between(1, 115)].copy()
+agg_force_logs = force_logs[force_logs['metric'].isin(force_metrics) & force_logs['step'].between(1, 200)].copy()
 agg_force_logs['display_step'] = (agg_force_logs['step'] - 1).astype(np.int64)  # Map step 20-150 to 0-130, ensure integer
 agg_force_logs = agg_force_logs.reset_index(drop=True)
-agg_torque_logs = torque_logs[torque_logs['metric'].isin(torque_metrics) & torque_logs['step'].between(1, 115)].copy()
+agg_torque_logs = torque_logs[torque_logs['metric'].isin(torque_metrics) & torque_logs['step'].between(1, 200)].copy()
 agg_torque_logs['display_step'] = (agg_torque_logs['step'] - 1).astype(np.int64)  # Map step 20-150 to 0-130, ensure integer
 agg_torque_logs = agg_torque_logs.reset_index(drop=True)
 
@@ -155,8 +155,8 @@ sns.lineplot(data=agg_force_logs,
              alpha=0.7,
              ax=axes[0])
 axes[0].set_ylabel('Force (N)', fontsize=16)
-axes[0].set_xlim(1, 115)
-axes[0].set_ylim(-2, 1)
+axes[0].set_xlim(1, 200)
+axes[0].set_ylim(-2.5, 1)
 axes[0].tick_params(axis='both', labelsize=14)  # Increase tick label size to 14
 axes[0].legend(loc='upper right', fancybox=True, bbox_to_anchor=(1, 1), shadow=False, framealpha=0.6,  ncol=1, prop={'size': 14})
 axes[0].set_xlabel('')
@@ -173,9 +173,9 @@ sns.lineplot(data=agg_torque_logs,
              ax=axes[1])
 axes[1].set_xlabel('Steps', fontsize=16)
 axes[1].set_ylabel('Torque (N·m)', fontsize=16)
-axes[1].set_xlim(1, 115)
+axes[1].set_xlim(1, 200)
 axes[1].set_ylim(-0.05, 0.05)
-axes[1].xaxis.set_major_locator(ticker.MultipleLocator(10))  # Integer ticks every 10 units
+axes[1].xaxis.set_major_locator(ticker.MultipleLocator(20))  # Integer ticks every 10 units
 axes[1].tick_params(axis='both', labelsize=14)  # Increase tick label size to 14
 axes[1].legend(loc='upper right', fancybox=True, bbox_to_anchor=(1, 1), shadow=False, framealpha=0.6,  ncol=1, prop={'size': 14})
 

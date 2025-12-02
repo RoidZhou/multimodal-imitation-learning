@@ -52,7 +52,7 @@ def sort_log_paths(paths, prefix='force'):
     return sorted(paths, key=get_priority)
 
 # Find TensorBoard log files
-path = '/home/zhou/autolab/imitation_learning_idp3/HDQN_peg/evaluation-plots/data/experimental_result_contact/HRL/square'
+path = '/home/zhou/autolab/imitation_learning_idp3/HDQN_peg/evaluation-plots/data/experimental_result_contact/HRL/irregular'
 force_log_paths = sort_log_paths(glob.glob(os.path.join(path, 'force/*')), prefix='f')
 torque_log_paths = sort_log_paths(glob.glob(os.path.join(path, 'torque/*')), prefix='t')
 
@@ -155,7 +155,7 @@ sns.lineplot(data=agg_force_logs,
              ax=axes[0])
 axes[0].set_ylabel('Force (N)', fontsize=16)
 axes[0].set_xlim(0, 170)
-axes[0].set_ylim(-4, 2)
+axes[0].set_ylim(-5, 3)
 axes[0].xaxis.set_major_locator(ticker.MultipleLocator(20))
 axes[0].tick_params(axis='both', labelsize=14)  # Increase tick label size to 14
 axes[0].legend(loc='upper right', fancybox=True, bbox_to_anchor=(1, 1), shadow=False, framealpha=0.6, ncol=1, prop={'size': 14})
