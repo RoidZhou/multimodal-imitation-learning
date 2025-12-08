@@ -317,7 +317,7 @@ class UR5Env:
         self.tool_id = p.loadSDF("./assert/ur_description/urdf/irregular_platform/urdf/irregular_platform.sdf")
         """ 用于测试恒力跟踪"""
         p.changeDynamics(self.tool_id[0], -1,
-                         lateralFriction=0.1, spinningFriction=0.1, rollingFriction=0, frictionAnchor=True)
+                         lateralFriction=0.1, spinningFriction=0.1, rollingFriction=0, frictionAnchor=True,mass=0)
 
         #  直的
         p.resetBasePositionAndOrientation(self.tool_id[0], [-0.4 + 0.05, 0.1 - 0.05, 0.32],
@@ -507,9 +507,9 @@ class UR5Env:
             p.resetJointState(bodyUniqueId=self.ur5_id_plan, jointIndex=i + 1, targetValue=self.init_joint_val[i], physicsClientId=self.physicsClient_plan)
 
         self.hole_up_end = np.zeros(3)
-        self.hole_up_end[0] = self.obj_t[0] - 0.0016
+        self.hole_up_end[0] = self.obj_t[0] + 0.0016
         self.hole_up_end[1] = self.obj_t[1] - 0.027
-        self.hole_up_end[2] = self.obj_t[2] + 0.109
+        self.hole_up_end[2] = self.obj_t[2] + 0.101
         # hole_orientation = Rotation.from_euler('xyz', [90, 90, -90], degrees=True).as_quat()
         self.target_joint_angles = p.calculateInverseKinematics(
             bodyUniqueId=self.ur5_id,
@@ -768,13 +768,13 @@ class UR5Env:
             cur_peg_pos = p.getLinkState(self.ur5_id, 8)[4]
             cur_peg_orie = p.getLinkState(self.ur5_id, 8)[5]
             cur_peg_pos = np.array(cur_peg_pos)
-            cur_peg_pos[2] -= 0.025
-            if self.prev_pos is not None:
-                # 绘制线段连接当前位置和上一个位置
-                p.addUserDebugLine(self.prev_pos, cur_peg_pos,
-                                   lineColorRGB=[0.0, 1.0, 1.0],  # 红色
-                                   lineWidth=4,
-                                   lifeTime=self.trail_duration)
+            cur_peg_pos[2] -= 0.0
+            # if self.prev_pos is not None:
+            #     # 绘制线段连接当前位置和上一个位置
+            #     p.addUserDebugLine(self.prev_pos, cur_peg_pos,
+            #                        lineColorRGB=[0.0, 1.0, 1.0],  # 红色
+            #                        lineWidth=4,
+            #                        lifeTime=self.trail_duration)
 
             self.prev_pos = cur_peg_pos
             # 关键帧绘制坐标系
